@@ -26,6 +26,11 @@ export function createAppDb(path) {
       value TEXT NOT NULL
     );
   `);
+  // migration: per-session model override (JSON {provider, model} or NULL)
+  const sessionCols = db.prepare(`PRAGMA table_info(sessions)`).all().map((c) => c.name);
+  if (!sessionCols.includes("model")) {
+    db.exec(`ALTER TABLE sessions ADD COLUMN model TEXT`);
+  }
 
   return {
     // --- sessions ---
@@ -53,6 +58,18 @@ export function createAppDb(path) {
     },
     deleteSession(id) {
       db.prepare(`DELETE FROM sessions WHERE id = ?`).run(id);
+    },
+    updateSession(id, { title, model }) {
+      if (title !== undefined) {
+        db.prepare(`UPDATE sessions SET title = ? WHERE id = ?`).run(title, id);
+      }
+      if (model !== undefined) {
+        // model: {provider, model} object or null to clear the override
+        db.prepare(`UPDATE sessions SET model = ? WHERE id = ?`).run(
+          model ? JSON.stringify(model) : null, id
+        );
+      }
+      return this.getSession(id);
     },
 
     // --- MCP servers ---

@@ -17,6 +17,9 @@ import { Command } from "@langchain/langgraph";
 import { createAppDb } from "./db.js";
 import { createCheckpointer } from "./checkpointer.js";
 import { buildAgent } from "./agent.js";
+import { getProviders, validateProviders, resolveModel, testProvider } from "./providers.js";
+import { getSkillDirs, scanSkills, readSkillFile, expandPath } from "./skills.js";
+import { testMcpServer } from "./mcp.js";
 import {
   serializeHistory,
   serializeInterrupts,
@@ -63,7 +66,17 @@ async function getSessionAgent(session) {
     checkpointer,
     mcpServers: db.listMcpServers(),
     approvalMode: db.getSetting("approvalMode", "dangerous"),
+    model: resolveModel(db, session),
+    skillDirs: getSkillDirs(db).map(expandPath),
   });
+}
+
+/** sessions carry model as a JSON TEXT column — expose it parsed. */
+function publicSession(s) {
+  if (!s) return s;
+  let model = null;
+  try { model = s.model ? JSON.parse(s.model) : null; } catch {}
+  return { ...s, model };
 }
 
 function threadConfig(sessionId) {
@@ -183,11 +196,14 @@ async function handleApi(req, url) {
 
   // ---- config / settings ----
   if (pathname === "/api/config" && method === "GET") {
+    let defaultModel = null;
+    try { defaultModel = resolveModel(db, null); } catch {}
     return json({
-      model: process.env.MODEL_NAME ?? null,
-      baseUrl: process.env.MODEL_BASE_URL ?? null,
       approvalMode: db.getSetting("approvalMode", "dangerous"),
       workspaceRoot: WORKSPACE_ROOT,
+      defaultModel: defaultModel
+        ? { provider: defaultModel.provider, model: defaultModel.model }
+        : null,
     });
   }
   if (pathname === "/api/settings" && method === "POST") {
@@ -198,12 +214,81 @@ async function handleApi(req, url) {
       }
       db.setSetting("approvalMode", body.approvalMode);
     }
+    if (body.defaultModel !== undefined) {
+      db.setSetting("defaultModel", body.defaultModel); // {provider, model} | null
+    }
     return json({ ok: true });
+  }
+
+  // ---- model providers ----
+  if (pathname === "/api/providers" && method === "GET") {
+    return json({
+      providers: getProviders(db),
+      defaultModel: db.getSetting("defaultModel"),
+    });
+  }
+  if (pathname === "/api/providers" && method === "POST") {
+    const body = await req.json();
+    const err = validateProviders(body.providers);
+    if (err) return json({ error: err }, 400);
+    db.setSetting("providers", body.providers);
+    return json({ ok: true });
+  }
+  if (pathname === "/api/providers/test" && method === "POST") {
+    const { baseUrl, apiKey, model } = await req.json();
+    if (!baseUrl || !apiKey || !model)
+      return json({ error: "baseUrl / apiKey / model required" }, 400);
+    return json(await testProvider({ baseUrl, apiKey, model }));
+  }
+
+  // ---- skills ----
+  if (pathname === "/api/skills" && method === "GET") {
+    const dirs = getSkillDirs(db);
+    const { skills, errors } = scanSkills(dirs);
+    return json({ dirs, skills, errors });
+  }
+  if (pathname === "/api/skills/dirs" && method === "POST") {
+    const body = await req.json();
+    if (!Array.isArray(body.dirs) || body.dirs.some((d) => typeof d !== "string" || !d.trim()))
+      return json({ error: "dirs must be a string array" }, 400);
+    db.setSetting("skillDirs", body.dirs.map((d) => d.trim()));
+    return json({ ok: true });
+  }
+  if (pathname === "/api/skills/file" && method === "GET") {
+    const path = url.searchParams.get("path");
+    if (!path) return json({ error: "path required" }, 400);
+    try {
+      return json({ path, content: readSkillFile(getSkillDirs(db), path) });
+    } catch (e) {
+      return json({ error: String(e?.message ?? e) }, 400);
+    }
+  }
+
+  // ---- recent working directories ----
+  if (pathname === "/api/dirs/recent" && method === "GET") {
+    const seen = new Set();
+    const dirs = [];
+    for (const s of db.listSessions()) {
+      if (s.cwd.startsWith(WORKSPACE_ROOT)) continue; // auto-created workspaces are noise
+      if (seen.has(s.cwd)) continue;
+      seen.add(s.cwd);
+      dirs.push(s.cwd);
+      if (dirs.length >= 8) break;
+    }
+    return json({ dirs });
   }
 
   // ---- MCP servers ----
   if (pathname === "/api/mcp" && method === "GET") {
     return json({ servers: db.listMcpServers() });
+  }
+  if (pathname === "/api/mcp/test" && method === "POST") {
+    const config = await req.json();
+    if (config.transport === "stdio" && !config.command)
+      return json({ error: "stdio transport requires command" }, 400);
+    if (config.transport === "http" && !config.url)
+      return json({ error: "http transport requires url" }, 400);
+    return json(await testMcpServer(config));
   }
   if (pathname === "/api/mcp" && method === "POST") {
     const body = await req.json();
@@ -230,7 +315,7 @@ async function handleApi(req, url) {
   if (pathname === "/api/sessions" && method === "GET") {
     return json({
       sessions: db.listSessions().map((s) => ({
-        ...s,
+        ...publicSession(s),
         busy: activeRuns.has(s.id),
       })),
     });
@@ -251,7 +336,7 @@ async function handleApi(req, url) {
       title: body.title?.trim() || "New session",
       cwd,
     });
-    return json({ session });
+    return json({ session: publicSession(session) });
   }
 
   const sm = pathname.match(
@@ -269,11 +354,34 @@ async function handleApi(req, url) {
       return json({ ok: true });
     }
 
+    if (!sub && method === "PATCH") {
+      const body = await req.json();
+      const patch = {};
+      if (body.title !== undefined) {
+        const title = String(body.title).trim();
+        if (!title) return json({ error: "title cannot be empty" }, 400);
+        patch.title = title.slice(0, 80);
+      }
+      if (body.model !== undefined) {
+        if (body.model === null) {
+          patch.model = null;
+        } else {
+          const p = getProviders(db).find(
+            (x) => x.enabled && x.name === body.model.provider
+          );
+          if (!p || !p.models.includes(body.model.model))
+            return json({ error: "unknown provider/model" }, 400);
+          patch.model = { provider: body.model.provider, model: body.model.model };
+        }
+      }
+      return json({ session: publicSession(db.updateSession(session.id, patch)) });
+    }
+
     if (sub === "history" && method === "GET") {
       const { agent } = await getSessionAgent(session);
       const state = await agent.getState(threadConfig(session.id));
       return json({
-        session,
+        session: publicSession(session),
         busy: activeRuns.has(session.id),
         messages: serializeHistory(state?.values?.messages),
         todos: state?.values?.todos ?? [],
@@ -337,7 +445,12 @@ const server = Bun.serve({
 });
 
 console.log(`deepagent-web listening on http://${HOST}:${server.port}`);
-console.log(`model: ${process.env.MODEL_NAME} @ ${process.env.MODEL_BASE_URL}`);
+try {
+  const m = resolveModel(db, null);
+  console.log(`default model: ${m.model} @ ${m.baseUrl} (${m.provider})`);
+} catch (e) {
+  console.warn(`no model configured yet: ${e.message}`);
+}
 console.log(`workspace root: ${WORKSPACE_ROOT}`);
 if (!AUTH_TOKEN && HOST !== "127.0.0.1" && HOST !== "localhost") {
   console.warn("WARNING: server exposed beyond localhost without AUTH_TOKEN");

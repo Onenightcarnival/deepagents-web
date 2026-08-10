@@ -68,3 +68,24 @@ export async function closeMcp() {
   if (cached?.client) await cached.client.close().catch(() => {});
   cached = null;
 }
+
+/**
+ * Test a single server config with a throwaway client.
+ * @returns {{ok: boolean, tools?: string[], error?: string}}
+ */
+export async function testMcpServer(config) {
+  const map = toAdapterConfig([{ ...config, name: config.name || "test", enabled: true }]);
+  const client = new MultiServerMCPClient({
+    mcpServers: map,
+    throwOnLoadError: true,
+    prefixToolNameWithServerName: false,
+  });
+  try {
+    const tools = await client.getTools();
+    return { ok: true, tools: tools.map((t) => t.name) };
+  } catch (e) {
+    return { ok: false, error: String(e?.message ?? e) };
+  } finally {
+    await client.close().catch(() => {});
+  }
+}

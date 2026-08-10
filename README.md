@@ -6,10 +6,12 @@
 
 ## 特性
 
-- **自定义大模型**：任何 OpenAI 兼容 API（DeepSeek、vLLM、Ollama、各类中转均可），在 `.env` 里配置
+- **多服务商模型管理**：设置页内配置多个 OpenAI 兼容服务商（DeepSeek、vLLM、Ollama、各类中转），支持连通性检测、默认模型和会话级模型切换，改完即时生效；`.env` 仅作首次种子/兜底
+- **项目化会话管理**：侧栏按项目文件夹分组，新建会话时选择工作目录（最近使用一键选取），会话可重命名
 - **本地执行**：agent 直接操作你机器上的文件和 shell（每个会话绑定一个工作目录）
 - **审批机制**：`execute` / `write_file` / `edit_file` 等危险操作默认中断，界面上批准或拒绝后继续；审批状态落库，刷新页面甚至重启服务后仍在
-- **MCP 接入**：界面上添加 stdio / HTTP 的 MCP 服务器，工具自动注入 agent
+- **技能（Skills）**：指定技能目录（默认 `~/.deepagent/skills/`），每个含 `SKILL.md` 的子目录自动加载为技能（与 Claude Code 技能格式一致，由 deepagents SkillsMiddleware 渐进式披露）
+- **MCP 接入**：设置页添加 stdio / HTTP 的 MCP 服务器，支持启用开关和连接测试，工具自动注入 agent
 - **SQLite 持久化**：会话历史、断点状态全部本地存储，无外部依赖
 - **规划能力**：deepagents 内置 todo list、子代理、上下文管理
 
@@ -35,9 +37,11 @@ bun start
 
 ## 使用说明
 
-**会话与工作目录**：每个会话绑定一个工作目录。新建会话时可以填入已有项目路径（如 `~/my-project`），agent 的文件操作和 shell 命令都在该目录下执行；留空则在 `workspaces/` 下自动创建独立目录。
+**会话与工作目录**：每个会话绑定一个工作目录。「新建会话」弹窗里可选择最近使用的目录或填入项目路径（如 `~/my-project`），agent 的文件操作和 shell 命令都在该目录下执行；留空则在 `workspaces/` 下自动创建独立目录。侧栏按项目文件夹分组展示会话。
 
-**审批模式**（左下角切换）：
+**模型服务**（设置 → 模型服务）：Cherry Studio 式配置。每个服务商有启用开关、API 地址、API 密钥（带「检测」按钮）和模型列表；顶栏模型 chip 可为单个会话切换模型，不选则用默认。首次启动会把 `.env` 中的 `MODEL_*` 自动迁移为「默认服务商」。
+
+**审批模式**（设置 → 通用）：
 
 | 模式 | 行为 |
 |------|------|
@@ -46,7 +50,9 @@ bun start
 | `dangerous+mcp` | 上述基础上，MCP 工具调用也需审批 |
 | `all` | 所有工具（包括只读）都需审批 |
 
-**MCP 服务器**：左下角「MCP 服务器管理」，支持两种传输方式。stdio 例：命令填 `npx -y @modelcontextprotocol/server-filesystem /tmp`；HTTP 例：URL 填 `http://localhost:8000/mcp`。保存后下一条消息生效，工具名会以 `服务器名__工具名` 前缀注入。
+**技能**（设置 → 技能）：配置若干技能目录（默认 `~/.deepagent/skills/`），目录下每个包含 `SKILL.md` 的子目录会被自动加载；多个目录中同名技能，后面的覆盖前面的。顶栏「⚡ N 技能」徽章可查看当前生效的技能。
+
+**MCP 服务器**（设置 → MCP 服务器）：支持两种传输方式。stdio 例：命令填 `npx -y @modelcontextprotocol/server-filesystem /tmp`；HTTP 例：URL 填 `http://localhost:8000/mcp`。「测试连接」可即时列出该服务器的工具；保存后下一条消息生效，工具名会以 `服务器名__工具名` 前缀注入。
 
 **局域网访问**：默认只监听 `127.0.0.1`。如需手机等设备访问，在 `.env` 设置 `HOST=0.0.0.0` 并**务必**设置 `AUTH_TOKEN`，访问时带 `?token=你的令牌` 或 `Authorization: Bearer` 头。
 
@@ -55,7 +61,9 @@ bun start
 ```
 src/
   server.js        Bun HTTP 服务：REST API + SSE 流式输出 + 静态文件
-  agent.js         createDeepAgent 组装：模型、LocalShellBackend、审批中断、MCP 工具
+  agent.js         createDeepAgent 组装：模型、LocalShellBackend、审批中断、MCP 工具、技能
+  providers.js     模型服务商配置（多 provider、解析会话模型、连通性检测）
+  skills.js        技能目录扫描与 SKILL.md frontmatter 解析
   checkpointer.js  bun:sqlite 适配的 LangGraph SqliteSaver（better-sqlite3 在 Bun 下不可用）
   db.js            应用元数据（会话列表、MCP 配置、设置）
   mcp.js           MultiServerMCPClient 管理（按配置哈希缓存连接）

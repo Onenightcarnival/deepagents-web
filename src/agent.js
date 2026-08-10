@@ -2,6 +2,7 @@
  * Deep agent construction: custom OpenAI-compatible model + local shell
  * backend + human-in-the-loop approvals + MCP tools + SQLite checkpointer.
  */
+import { existsSync } from "node:fs";
 import { createDeepAgent, LocalShellBackend } from "deepagents";
 import { ChatOpenAI } from "@langchain/openai";
 import { getMcpTools } from "./mcp.js";
@@ -16,14 +17,14 @@ Rules:
 - Reply in the same language the user writes in.
 - Keep final answers concise; the user can see tool outputs in the UI.`;
 
-export function buildModel(env = process.env) {
-  const baseURL = env.MODEL_BASE_URL;
-  const apiKey = env.MODEL_API_KEY;
-  const model = env.MODEL_NAME;
-  if (!baseURL || !apiKey || !model) {
-    throw new Error(
-      "Missing model configuration: set MODEL_BASE_URL, MODEL_API_KEY, MODEL_NAME in .env"
-    );
+/**
+ * @param {{baseUrl: string, apiKey: string, model: string}} resolved
+ *   Concrete model config (see providers.js resolveModel).
+ */
+export function buildModel(resolved) {
+  const { baseUrl, apiKey, model } = resolved;
+  if (!baseUrl || !apiKey || !model) {
+    throw new Error("模型配置不完整：请在设置 → 模型服务中配置，或在 .env 中配置 MODEL_*");
   }
   // NOTE: do not set `streaming: true` here — under Bun, ChatOpenAI's
   // invoke() path with forced streaming can stall. LangGraph still streams
@@ -31,11 +32,11 @@ export function buildModel(env = process.env) {
   const opts = {
     model,
     apiKey,
-    configuration: { baseURL },
-    maxRetries: Number(env.MODEL_MAX_RETRIES ?? 2),
+    configuration: { baseURL: baseUrl },
+    maxRetries: Number(process.env.MODEL_MAX_RETRIES ?? 2),
   };
-  if (env.MODEL_TEMPERATURE !== undefined && env.MODEL_TEMPERATURE !== "") {
-    opts.temperature = Number(env.MODEL_TEMPERATURE);
+  if (process.env.MODEL_TEMPERATURE !== undefined && process.env.MODEL_TEMPERATURE !== "") {
+    opts.temperature = Number(process.env.MODEL_TEMPERATURE);
   }
   return new ChatOpenAI(opts);
 }
@@ -63,8 +64,10 @@ function buildInterruptOn(approvalMode, mcpToolNames) {
  * @param {object} opts.checkpointer   shared SqliteSaver
  * @param {Array}  opts.mcpServers     MCP server configs from the app db
  * @param {string} opts.approvalMode   "off" | "dangerous" | "dangerous+mcp" | "all"
+ * @param {object} opts.model          resolved model config {baseUrl, apiKey, model}
+ * @param {string[]} [opts.skillDirs]  absolute skill source directories
  */
-export async function buildAgent({ cwd, checkpointer, mcpServers, approvalMode }) {
+export async function buildAgent({ cwd, checkpointer, mcpServers, approvalMode, model, skillDirs }) {
   const { tools: mcpTools, errors: mcpErrors } = await getMcpTools(mcpServers ?? []);
 
   const backend = new LocalShellBackend({
@@ -74,12 +77,16 @@ export async function buildAgent({ cwd, checkpointer, mcpServers, approvalMode }
     maxOutputBytes: 200_000,
   });
 
+  // only pass skill dirs that exist — SkillsMiddleware errors on missing paths
+  const skills = (skillDirs ?? []).filter((d) => existsSync(d)).map((d) => (d.endsWith("/") ? d : d + "/"));
+
   const agent = createDeepAgent({
-    model: buildModel(),
+    model: buildModel(model),
     backend,
     tools: mcpTools,
     systemPrompt: SYSTEM_PROMPT,
     checkpointer,
+    ...(skills.length ? { skills } : {}),
     interruptOn: buildInterruptOn(
       approvalMode ?? "dangerous",
       mcpTools.map((t) => t.name)
