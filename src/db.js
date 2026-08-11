@@ -18,7 +18,7 @@ export function createAppDb(path) {
     );
     CREATE TABLE IF NOT EXISTS mcp_servers (
       name TEXT PRIMARY KEY,
-      config TEXT NOT NULL,   -- JSON: {transport:"stdio"|"http", command?, args?, url?, headers?, env?}
+      config TEXT NOT NULL,   -- JSON: {transport:"http", url, headers?, disabledTools?}
       enabled INTEGER NOT NULL DEFAULT 1
     );
     CREATE TABLE IF NOT EXISTS settings (

@@ -284,22 +284,24 @@ async function handleApi(req, url) {
   }
   if (pathname === "/api/mcp/test" && method === "POST") {
     const config = await req.json();
-    if (config.transport === "stdio" && !config.command)
-      return json({ error: "stdio transport requires command" }, 400);
-    if (config.transport === "http" && !config.url)
-      return json({ error: "http transport requires url" }, 400);
+    if (config.transport !== "http")
+      return json({ error: "only streamable http transport is supported" }, 400);
+    if (!config.url) return json({ error: "http transport requires url" }, 400);
     return json(await testMcpServer(config));
   }
   if (pathname === "/api/mcp" && method === "POST") {
     const body = await req.json();
     const { name, enabled = true, ...config } = body;
     if (!name || !/^[\w-]+$/.test(name)) return json({ error: "invalid name" }, 400);
-    if (config.transport === "stdio" && !config.command)
-      return json({ error: "stdio transport requires command" }, 400);
-    if (config.transport === "http" && !config.url)
-      return json({ error: "http transport requires url" }, 400);
-    if (!["stdio", "http"].includes(config.transport))
-      return json({ error: "transport must be stdio or http" }, 400);
+    if (config.transport !== "http")
+      return json({ error: "only streamable http transport is supported" }, 400);
+    if (!config.url) return json({ error: "http transport requires url" }, 400);
+    if (config.disabledTools !== undefined) {
+      if (!Array.isArray(config.disabledTools))
+        return json({ error: "disabledTools must be an array of tool names" }, 400);
+      config.disabledTools = config.disabledTools.filter((t) => typeof t === "string");
+      if (config.disabledTools.length === 0) delete config.disabledTools;
+    }
     db.upsertMcpServer(name, config, enabled);
     return json({ ok: true });
   }

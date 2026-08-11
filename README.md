@@ -11,7 +11,7 @@
 - **本地执行**：agent 直接操作你机器上的文件和 shell（每个会话绑定一个工作目录）
 - **审批机制**：`execute` / `write_file` / `edit_file` 等危险操作默认中断，界面上批准或拒绝后继续；审批状态落库，刷新页面甚至重启服务后仍在
 - **技能（Skills）**：指定技能目录（默认 `~/.deepagent/skills/`），每个含 `SKILL.md` 的子目录自动加载为技能（与 Claude Code 技能格式一致，由 deepagents SkillsMiddleware 渐进式披露）
-- **MCP 接入**：设置页添加 stdio / HTTP 的 MCP 服务器，支持启用开关和连接测试，工具自动注入 agent
+- **MCP 接入**：设置页添加 Streamable HTTP 的 MCP 服务器，支持启用开关和连接测试，工具自动注入 agent
 - **SQLite 持久化**：会话历史、断点状态全部本地存储，无外部依赖
 - **规划能力**：deepagents 内置 todo list、子代理、上下文管理
 
@@ -52,7 +52,7 @@ bun start
 
 **技能**（设置 → 技能）：配置若干技能目录（默认 `~/.deepagent/skills/`），目录下每个包含 `SKILL.md` 的子目录会被自动加载；多个目录中同名技能，后面的覆盖前面的。顶栏「⚡ N 技能」徽章可查看当前生效的技能。
 
-**MCP 服务器**（设置 → MCP 服务器）：支持两种传输方式。stdio 例：命令填 `npx -y @modelcontextprotocol/server-filesystem /tmp`；HTTP 例：URL 填 `http://localhost:8000/mcp`。「测试连接」可即时列出该服务器的工具；保存后下一条消息生效，工具名会以 `服务器名__工具名` 前缀注入。
+**MCP 服务器**（设置 → MCP 服务器）：仅支持 Streamable HTTP 传输（不依赖本机的 npx / bun / uv 环境）。左侧选择服务器，右侧分「通用 / 工具 / 提示词 / 资源」页签：通用页配置 URL 和鉴权请求头并测试连接，其余页签展示服务器暴露的工具（含参数文档）、提示词和资源。工具页可逐个停用工具（停用的不注入 agent）；MCP 调用是否需要审批由通用页的审批模式统一控制（`dangerous+mcp`）。保存后下一条消息生效，工具名会以 `服务器名__工具名` 前缀注入。
 
 **局域网访问**：默认只监听 `127.0.0.1`。如需手机等设备访问，在 `.env` 设置 `HOST=0.0.0.0` 并**务必**设置 `AUTH_TOKEN`，访问时带 `?token=你的令牌` 或 `Authorization: Bearer` 头。
 
@@ -93,6 +93,6 @@ workspaces/        自动创建的会话工作目录
 
 **会话卡在「运行中」**：点「停止」按钮中断当前运行；状态由 checkpointer 保存，可继续对话。
 
-**MCP 连不上**：stdio 方式确认命令在你的 PATH 中可执行；HTTP 方式确认 URL 可达。界面发消息时会显示 MCP 加载错误横幅。
+**MCP 连不上**：确认 URL 可达、鉴权请求头正确。界面发消息时会显示 MCP 加载错误横幅。
 
 **换模型**：改 `.env` 后重启 `bun start` 即可，历史会话不受影响。
