@@ -17,7 +17,7 @@ import { Command } from "@langchain/langgraph";
 import { createAppDb } from "./db.js";
 import { createCheckpointer } from "./checkpointer.js";
 import { buildAgent } from "./agent.js";
-import { getProviders, validateProviders, resolveModel, testProvider } from "./providers.js";
+import { getProviders, validateProviders, resolveModel, resolveParams, testProvider } from "./providers.js";
 import { getSkillDirs, scanSkills, readSkillFile, expandPath } from "./skills.js";
 import { testMcpServer } from "./mcp.js";
 import {
@@ -60,13 +60,23 @@ function checkAuth(req) {
   return url.searchParams.get("token") === AUTH_TOKEN;
 }
 
+/**
+ * Model + params follow the project. A "project" is the session's working
+ * directory; sessions in auto-created workspaces share one virtual project.
+ */
+function projectKeyFor(session) {
+  return session.cwd.startsWith(WORKSPACE_ROOT) ? "__standalone__" : session.cwd;
+}
+
 async function getSessionAgent(session) {
+  const projectKey = projectKeyFor(session);
   return buildAgent({
     cwd: session.cwd,
     checkpointer,
     mcpServers: db.listMcpServers(),
     approvalMode: db.getSetting("approvalMode", "dangerous"),
-    model: resolveModel(db, session),
+    model: resolveModel(db, projectKey),
+    params: resolveParams(db, projectKey),
     skillDirs: getSkillDirs(db).map(expandPath),
   });
 }
@@ -204,6 +214,7 @@ async function handleApi(req, url) {
       defaultModel: defaultModel
         ? { provider: defaultModel.provider, model: defaultModel.model }
         : null,
+      projectConfig: db.getSetting("projectConfig", {}),
     });
   }
   if (pathname === "/api/settings" && method === "POST") {
@@ -218,6 +229,48 @@ async function handleApi(req, url) {
       db.setSetting("defaultModel", body.defaultModel); // {provider, model} | null
     }
     return json({ ok: true });
+  }
+
+  // ---- project-level model + params ----
+  if (pathname === "/api/project-config" && method === "POST") {
+    const body = await req.json();
+    const key = String(body.key ?? "").trim();
+    if (!key) return json({ error: "key required" }, 400);
+    const cfg = db.getSetting("projectConfig", {});
+    const entry = cfg[key] ?? {};
+    if (body.model !== undefined) {
+      if (body.model === null) {
+        entry.model = null;
+      } else {
+        const p = getProviders(db).find(
+          (x) => x.enabled && x.name === body.model.provider
+        );
+        if (!p || !p.models.includes(body.model.model))
+          return json({ error: "unknown provider/model" }, 400);
+        entry.model = { provider: body.model.provider, model: body.model.model };
+      }
+    }
+    if (body.params !== undefined) {
+      const src = body.params ?? {};
+      const params = {};
+      if (src.thinking === "on" || src.thinking === "off") params.thinking = src.thinking;
+      if (["low", "high", "max"].includes(src.thinkingEffort))
+        params.thinkingEffort = src.thinkingEffort;
+      if (src.temperature != null) {
+        const t = Number(src.temperature);
+        if (!(t >= 0 && t <= 2)) return json({ error: "temperature must be 0-2" }, 400);
+        params.temperature = t;
+      }
+      if (src.maxTokens != null) {
+        const n = Math.floor(Number(src.maxTokens));
+        if (!(n > 0)) return json({ error: "maxTokens must be a positive integer" }, 400);
+        params.maxTokens = n;
+      }
+      entry.params = params;
+    }
+    cfg[key] = entry;
+    db.setSetting("projectConfig", cfg);
+    return json({ ok: true, key, config: entry });
   }
 
   // ---- model providers ----
@@ -363,18 +416,6 @@ async function handleApi(req, url) {
         const title = String(body.title).trim();
         if (!title) return json({ error: "title cannot be empty" }, 400);
         patch.title = title.slice(0, 80);
-      }
-      if (body.model !== undefined) {
-        if (body.model === null) {
-          patch.model = null;
-        } else {
-          const p = getProviders(db).find(
-            (x) => x.enabled && x.name === body.model.provider
-          );
-          if (!p || !p.models.includes(body.model.model))
-            return json({ error: "unknown provider/model" }, 400);
-          patch.model = { provider: body.model.provider, model: body.model.model };
-        }
       }
       return json({ session: publicSession(db.updateSession(session.id, patch)) });
     }

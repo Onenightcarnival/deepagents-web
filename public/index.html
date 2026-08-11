@@ -43,12 +43,19 @@
   #sidebar header h1 { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
   #btn-new { width: 100%; padding: 8px; }
   #sessions { flex: 1; overflow-y: auto; padding: 8px; }
+  .group { margin-bottom: 2px; }
   .group-head {
-    display: flex; align-items: center; gap: 6px; padding: 7px 6px 3px;
-    cursor: pointer; user-select: none; color: var(--text); font-size: 13px;
+    display: flex; align-items: center; gap: 7px; padding: 7px 8px;
+    border-radius: 7px; cursor: pointer; user-select: none;
+    color: var(--text); font-size: 13px;
   }
-  .group-head .chev { color: var(--text-dim); font-size: 10px; width: 10px; transition: transform 0.12s; }
+  .group-head:hover { background: var(--bg3); }
+  .group-head .chev {
+    color: var(--text-dim); font-size: 10px; width: 10px; flex: none;
+    transition: transform 0.12s;
+  }
   .group.collapsed .chev { transform: rotate(-90deg); }
+  .group-head .gicon { flex: none; font-size: 12px; }
   .group-head .gname { font-weight: 600; white-space: nowrap; }
   .group-head .gpath {
     color: var(--text-dim); font-size: 11px; font-family: ui-monospace, monospace;
@@ -56,13 +63,17 @@
   }
   .group-head .gcount {
     color: var(--text-dim); font-size: 11px; background: var(--bg3);
-    border-radius: 8px; padding: 0 6px;
+    border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; flex: none;
   }
+  .group-head:hover .gcount { background: var(--bg2); }
   .group.collapsed .group-body { display: none; }
+  .group-body { padding-left: 12px; }
   .session-item {
-    padding: 6px 8px 6px 22px; border-radius: 6px; cursor: pointer; margin: 1px 0;
+    padding: 6px 8px; border-radius: 6px; cursor: pointer; margin: 1px 0;
     display: flex; align-items: flex-start; gap: 7px; position: relative;
   }
+  .session-item.new-in { color: var(--text-dim); font-size: 12.5px; padding: 5px 8px; }
+  .session-item.new-in:hover { color: var(--text); }
   .session-item:hover { background: var(--bg3); }
   .session-item.active { background: var(--bg3); }
   .session-item .dot {
@@ -101,19 +112,59 @@
   #model-chip:hover { color: var(--text); }
   #model-menu {
     display: none; position: absolute; right: 0; top: 26px; z-index: 30;
-    background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
-    min-width: 240px; max-height: 320px; overflow-y: auto; padding: 6px;
-    box-shadow: 0 8px 24px #0008; text-align: left;
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 10px;
+    width: 300px; max-height: 480px; overflow-y: auto;
+    box-shadow: 0 14px 40px #000a; text-align: left; white-space: normal;
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   }
   #model-menu.open { display: block; }
-  #model-menu .m-group { color: var(--text-dim); font-size: 11px; padding: 6px 8px 2px; }
+  #model-menu .m-sec {
+    font-size: 11px; color: var(--text-dim); letter-spacing: 1px;
+    text-transform: uppercase; padding: 12px 14px 4px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  #model-menu .proj-tag {
+    font-size: 10.5px; color: var(--yellow); border: 1px solid #d2992266;
+    border-radius: 8px; padding: 0 6px; text-transform: none; letter-spacing: normal;
+    font-family: ui-monospace, monospace; max-width: 150px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #model-menu .m-group { color: var(--text-dim); font-size: 11.5px; padding: 8px 14px 2px; }
   #model-menu .m-item {
-    padding: 6px 8px; border-radius: 6px; cursor: pointer; color: var(--text);
-    font-family: ui-monospace, monospace; font-size: 12px;
-    display: flex; justify-content: space-between; gap: 10px;
+    padding: 6px 14px; cursor: pointer; color: var(--text);
+    font-family: ui-monospace, monospace; font-size: 12.5px;
+    display: flex; justify-content: space-between; gap: 10px; align-items: center;
   }
   #model-menu .m-item:hover { background: var(--bg3); }
   #model-menu .m-item .check { color: var(--accent); }
+  #model-menu hr { border: none; border-top: 1px solid var(--border); margin: 10px 0 0; }
+  #model-menu .param { padding: 9px 14px; font-size: 13px; color: var(--text); }
+  #model-menu .param .p-head { display: flex; align-items: center; gap: 8px; }
+  #model-menu .param .p-val {
+    margin-left: auto; font-family: ui-monospace, monospace; font-size: 12px;
+    color: var(--text-dim);
+  }
+  #model-menu .param .p-reset {
+    background: none; border: none; color: var(--text-dim); font-size: 11.5px;
+    cursor: pointer; padding: 0; margin-left: 8px;
+  }
+  #model-menu .param .p-reset:hover { color: var(--text); }
+  #model-menu .param input[type=range] {
+    width: 100%; margin-top: 8px; accent-color: var(--accent); height: 4px; padding: 0;
+  }
+  #model-menu .param input[type=number] {
+    width: 110px; margin-left: auto; text-align: right; padding: 3px 6px; font-size: 12px;
+  }
+  #model-menu .seg { display: flex; gap: 4px; margin-top: 8px; }
+  #model-menu .seg button {
+    flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text-dim);
+    border-radius: 6px; padding: 4px 0; font-size: 12px; cursor: pointer;
+  }
+  #model-menu .seg button.on { border-color: var(--accent); color: var(--accent); background: #58a6ff14; }
+  #model-menu .pop-foot {
+    border-top: 1px solid var(--border); padding: 9px 14px; font-size: 11.5px;
+    color: var(--text-dim); background: var(--bg); line-height: 1.6;
+  }
   #skills-chip { cursor: default; position: relative; }
   #skills-chip:hover { color: var(--text); }
   #skills-tip {
@@ -134,9 +185,38 @@
     padding: 10px 14px; margin-left: 15%; white-space: pre-wrap;
   }
   .msg.assistant .content { line-height: 1.65; }
-  .msg .reasoning {
-    color: var(--text-dim); font-size: 13px; border-left: 3px solid var(--purple);
-    padding: 4px 10px; margin: 6px 0; white-space: pre-wrap;
+  /* thinking: collapsed row, expandable */
+  .think { margin: 8px 0; }
+  .think-head {
+    display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;
+    color: var(--text-dim); font-size: 12.5px; padding: 3px 0; background: none;
+    border: none; font-family: inherit; width: 100%; text-align: left;
+  }
+  .think-head:hover { color: var(--text); }
+  .think-head .tk-ico { color: var(--purple); font-size: 13px; flex: none; }
+  .think-head .tk-label {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+  }
+  .think .chev, .trow .chev {
+    font-size: 9px; transition: transform 0.15s; color: var(--text-dim);
+    width: 10px; flex: none;
+  }
+  .think.open > .think-head .chev { transform: rotate(90deg); }
+  .think-body {
+    display: none; margin: 4px 0 4px 5px; padding: 6px 14px;
+    border-left: 2px solid #bc8cff55; color: var(--text-dim); font-size: 12.5px;
+    white-space: pre-wrap; line-height: 1.7;
+  }
+  .think.open .think-body { display: block; }
+  .shimmer-text {
+    background: linear-gradient(90deg, var(--text-dim) 30%, var(--text) 50%, var(--text-dim) 70%);
+    background-size: 200% 100%; -webkit-background-clip: text; background-clip: text;
+    color: transparent; animation: shimmer 1.6s linear infinite;
+  }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    .shimmer-text { animation: none; color: var(--text-dim); background: none; }
+    .think .chev, .trow .chev { transition: none; }
   }
   .msg .content pre {
     background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
@@ -146,27 +226,43 @@
   .msg .content p code, .msg .content li code {
     background: var(--bg3); padding: 1px 5px; border-radius: 4px; font-size: 13px;
   }
-  .tool-card {
-    background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
-    margin: 8px 0; overflow: hidden; font-size: 13px;
+  /* tool calls: single-line rows grouped in one container */
+  .tool-group {
+    border: 1px solid var(--border); border-radius: 9px; overflow: hidden;
+    margin: 10px 0; background: var(--bg2); font-size: 13px;
   }
-  .tool-card .tool-head {
-    padding: 7px 12px; display: flex; gap: 8px; align-items: center;
-    cursor: pointer; user-select: none;
+  .trow + .trow { border-top: 1px solid var(--border); }
+  .trow-head {
+    display: flex; align-items: center; gap: 9px; padding: 7px 12px; cursor: pointer;
+    user-select: none; background: none; border: none; width: 100%; text-align: left;
+    font-family: inherit; color: var(--text); font-size: 13px;
   }
-  .tool-card .tool-name { color: var(--accent); font-family: monospace; font-weight: 600; }
-  .tool-card .tool-arg {
-    color: var(--text-dim); font-family: monospace; white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis; flex: 1;
+  .trow-head:hover { background: var(--bg3); }
+  .trow.open > .trow-head .chev { transform: rotate(90deg); }
+  .trow-head .t-ico { flex: none; width: 16px; text-align: center; font-size: 12px; }
+  .trow-head .t-name {
+    font-family: ui-monospace, monospace; font-weight: 600; font-size: 12.5px;
+    color: var(--accent); flex: none;
   }
-  .tool-card .tool-status { font-size: 12px; }
-  .tool-card .tool-body { border-top: 1px solid var(--border); padding: 8px 12px; display: none; }
-  .tool-card.open .tool-body { display: block; }
-  .tool-card .tool-body pre {
-    white-space: pre-wrap; word-break: break-all; font-size: 12px;
-    font-family: ui-monospace, monospace; max-height: 300px; overflow-y: auto;
+  .trow-head .t-arg {
+    font-family: ui-monospace, monospace; font-size: 12.5px; color: var(--text-dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 40px;
   }
-  .tool-body .label { color: var(--text-dim); font-size: 11px; margin: 6px 0 2px; }
+  .trow-head .t-meta { font-size: 11.5px; color: var(--text-dim); flex: none; white-space: nowrap; }
+  .trow-head .t-st { flex: none; font-size: 12px; width: 14px; text-align: center; }
+  .trow-head .t-st.ok { color: var(--green); }
+  .trow-head .t-st.err { color: var(--red); }
+  .trow-body { display: none; border-top: 1px solid var(--border); background: var(--bg); }
+  .trow.open > .trow-body { display: block; }
+  .trow-body .io-label {
+    font-size: 10.5px; color: var(--text-dim); letter-spacing: 1px;
+    text-transform: uppercase; padding: 8px 14px 0;
+  }
+  .trow-body pre {
+    white-space: pre-wrap; word-break: break-all; font-size: 12px; line-height: 1.6;
+    font-family: ui-monospace, monospace; max-height: 260px; overflow-y: auto;
+    padding: 4px 14px 10px; margin: 0;
+  }
   .approval {
     background: #d2992211; border: 1px solid var(--yellow); border-radius: 10px;
     padding: 14px; margin: 12px 0;
@@ -604,12 +700,13 @@ function newAssistantTurn() {
   const div = document.createElement("div");
   div.className = "msg assistant";
   chatEl.appendChild(div);
-  state.liveAssistant = { root: div, textEl: null, reasoningEl: null, text: "", reasoning: "" };
+  state.liveAssistant = { root: div, textEl: null, think: null, text: "" };
   return state.liveAssistant;
 }
 function liveTurn() { return state.liveAssistant ?? newAssistantTurn(); }
 function appendAiText(text) {
   const turn = liveTurn();
+  finalizeThink(turn);
   if (!turn.textEl || turn.textEl !== turn.root.lastElementChild) {
     turn.textEl = document.createElement("div");
     turn.textEl.className = "content";
@@ -620,49 +717,111 @@ function appendAiText(text) {
   turn.textEl.innerHTML = renderMd(turn.text);
   scrollBottom();
 }
+// --- thinking: collapsed row; shimmer while streaming, "已思考 · N 秒" when done
+function ensureThink(turn) {
+  if (!turn.think) {
+    const el = document.createElement("div");
+    el.className = "think";
+    el.innerHTML = `
+      <button class="think-head" type="button">
+        <span class="chev">▶</span><span class="tk-ico">✦</span>
+        <span class="tk-label"></span>
+      </button>
+      <div class="think-body"></div>`;
+    el.querySelector(".think-head").onclick = () => el.classList.toggle("open");
+    turn.root.appendChild(el);
+    turn.think = {
+      el,
+      label: el.querySelector(".tk-label"),
+      body: el.querySelector(".think-body"),
+      text: "",
+      startedAt: Date.now(),
+      done: false,
+    };
+  }
+  return turn.think;
+}
 function appendReasoning(text) {
   const turn = liveTurn();
-  if (!turn.reasoningEl) {
-    turn.reasoningEl = document.createElement("div");
-    turn.reasoningEl.className = "reasoning";
-    turn.root.appendChild(turn.reasoningEl);
-  }
-  turn.reasoning += text;
-  turn.reasoningEl.textContent = turn.reasoning;
+  const th = ensureThink(turn);
+  th.text += text;
+  th.body.textContent = th.text;
+  const lastLine = th.text.trim().split("\n").filter(Boolean).pop() ?? "";
+  th.label.innerHTML = `<span class="shimmer-text">思考中 · ${esc(lastLine.slice(-60))}</span>`;
   scrollBottom();
+}
+function finalizeThink(turn) {
+  const th = turn?.think;
+  if (!th || th.done) return;
+  th.done = true;
+  const secs = Math.max(1, Math.round((Date.now() - th.startedAt) / 1000));
+  th.label.textContent = `已思考 · ${secs} 秒`;
+}
+function addHistoryThink(turn, text) {
+  const th = ensureThink(turn);
+  th.text = text;
+  th.body.textContent = text;
+  th.done = true;
+  th.label.textContent = "思考过程";
+}
+
+// --- tool calls: single-line rows, consecutive calls share one group container
+const TOOL_ICONS = {
+  execute: "⌨️", read_file: "📖", write_file: "📝", edit_file: "✏️",
+  ls: "📂", glob: "🔍", grep: "🔍", write_todos: "☑️", task: "🤖",
+};
+function toolArgSummary(name, args) {
+  if (!args || typeof args !== "object") return "";
+  if (name === "execute") return args.command ?? "";
+  if (args.file_path || args.path) return args.file_path ?? args.path;
+  if (name === "glob" || name === "grep") return args.pattern ?? JSON.stringify(args);
+  if (name === "write_todos") return `${(args.todos ?? []).length} 项`;
+  return JSON.stringify(args);
 }
 function addToolCard(call) {
   const turn = liveTurn();
-  const card = document.createElement("div");
-  card.className = "tool-card";
-  card.dataset.callId = call.id ?? "";
-  const argPreview = call.name === "execute"
-    ? (call.args?.command ?? "")
-    : JSON.stringify(call.args ?? {});
-  card.innerHTML = `
-    <div class="tool-head">
-      <span class="tool-name">${esc(call.name)}</span>
-      <span class="tool-arg">${esc(argPreview)}</span>
-      <span class="tool-status"><span class="spinner"></span></span>
-    </div>
-    <div class="tool-body">
-      <div class="label">参数</div><pre>${esc(JSON.stringify(call.args ?? {}, null, 2))}</pre>
+  finalizeThink(turn);
+  let group = turn.root.lastElementChild;
+  if (!group || !group.classList.contains("tool-group")) {
+    group = document.createElement("div");
+    group.className = "tool-group";
+    turn.root.appendChild(group);
+  }
+  const row = document.createElement("div");
+  row.className = "trow";
+  row.dataset.callId = call.id ?? "";
+  row.innerHTML = `
+    <button class="trow-head" type="button">
+      <span class="chev">▶</span>
+      <span class="t-ico">${TOOL_ICONS[call.name] ?? "🔧"}</span>
+      <span class="t-name">${esc(call.name)}</span>
+      <span class="t-arg">${esc(toolArgSummary(call.name, call.args))}</span>
+      <span class="t-meta"></span>
+      <span class="t-st"><span class="spinner"></span></span>
+    </button>
+    <div class="trow-body">
+      <div class="io-label">参数</div><pre>${esc(JSON.stringify(call.args ?? {}, null, 2))}</pre>
       <div class="result-slot"></div>
     </div>`;
-  card.querySelector(".tool-head").onclick = () => card.classList.toggle("open");
-  turn.root.appendChild(card);
+  row.querySelector(".trow-head").onclick = () => row.classList.toggle("open");
+  group.appendChild(row);
   turn.textEl = null;
   scrollBottom();
-  return card;
+  return row;
 }
 function setToolResult(id, name, text, status) {
-  let card = chatEl.querySelector(`.tool-card[data-call-id="${CSS.escape(id ?? "")}"]`);
-  if (!card) card = addToolCard({ id, name, args: {} });
+  let row = chatEl.querySelector(`.trow[data-call-id="${CSS.escape(id ?? "")}"]`);
+  if (!row) row = addToolCard({ id, name, args: {} });
   const ok = status !== "error";
-  card.querySelector(".tool-status").innerHTML = ok ? "✓" : "✗";
-  card.querySelector(".tool-status").style.color = ok ? "var(--green)" : "var(--red)";
-  const slot = card.querySelector(".result-slot");
-  slot.innerHTML = `<div class="label">结果</div><pre>${esc(text || "(空)")}</pre>`;
+  const st = row.querySelector(".t-st");
+  st.textContent = ok ? "✓" : "✗";
+  st.className = "t-st " + (ok ? "ok" : "err");
+  const lines = (text ?? "").split("\n").length;
+  row.querySelector(".t-meta").textContent = ok
+    ? (text && lines > 1 ? `${lines} 行` : "")
+    : "出错";
+  row.querySelector(".result-slot").innerHTML =
+    `<div class="io-label">结果</div><pre>${esc(text || "(空)")}</pre>`;
   scrollBottom();
 }
 function addWarnBanner(text) {
@@ -747,16 +906,16 @@ function handleEvent(ev) {
     case "reasoning_delta": appendReasoning(ev.text); break;
     case "tool_calls":
       for (const c of ev.calls) {
-        if (!chatEl.querySelector(`.tool-card[data-call-id="${CSS.escape(c.id ?? "")}"]`))
+        if (!chatEl.querySelector(`.trow[data-call-id="${CSS.escape(c.id ?? "")}"]`))
           addToolCard(c);
       }
       break;
     case "tool_result": setToolResult(ev.id, ev.name, ev.text, ev.status); break;
     case "todos": renderTodos(ev.todos); break;
-    case "interrupt": showApproval(ev.interrupts); break;
+    case "interrupt": finalizeThink(state.liveAssistant); showApproval(ev.interrupts); break;
     case "warning": addWarnBanner(ev.message); break;
     case "error": addWarnBanner("错误: " + ev.message); break;
-    case "done": break;
+    case "done": finalizeThink(state.liveAssistant); break;
   }
 }
 async function runStream(url, body, statusText) {
@@ -803,65 +962,112 @@ async function loadSessions() {
   state.sessions = sessions;
   renderSessions();
 }
+function projectKeyOf(cwd) {
+  const ws = state.config?.workspaceRoot;
+  return ws && cwd?.startsWith(ws) ? "__standalone__" : cwd;
+}
+function projectLabel(key) {
+  return key === "__standalone__" ? "独立会话" : baseName(key);
+}
 function renderSessions() {
-  const groups = new Map(); // cwd -> sessions[]
+  const groups = new Map(); // projectKey -> sessions[]
   for (const s of state.sessions) {
-    if (!groups.has(s.cwd)) groups.set(s.cwd, []);
-    groups.get(s.cwd).push(s);
+    const key = projectKeyOf(s.cwd);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(s);
   }
-  const sorted = [...groups.entries()].sort(
+  const entries = [...groups.entries()].sort(
     (a, b) => Math.max(...b[1].map(s => s.updated_at)) - Math.max(...a[1].map(s => s.updated_at))
   );
+  // projects by recency, the standalone group always last
+  const ordered = [
+    ...entries.filter(([k]) => k !== "__standalone__"),
+    ...entries.filter(([k]) => k === "__standalone__"),
+  ];
   const el = $("sessions");
   el.innerHTML = "";
-  for (const [cwd, list] of sorted) {
-    const g = document.createElement("div");
-    g.className = "group" + (state.collapsed.has(cwd) ? " collapsed" : "");
-    const head = document.createElement("div");
-    head.className = "group-head";
-    head.innerHTML = `<span class="chev">▼</span><span>📁</span>
-      <span class="gname">${esc(baseName(cwd))}</span>
-      <span class="gpath">${esc(shortPath(cwd))}</span>
-      <span class="gcount">${list.length}</span>`;
-    head.onclick = () => {
-      g.classList.toggle("collapsed");
-      if (g.classList.contains("collapsed")) state.collapsed.add(cwd);
-      else state.collapsed.delete(cwd);
-      saveCollapsed();
-    };
-    g.appendChild(head);
-    const body = document.createElement("div");
-    body.className = "group-body";
-    for (const s of list) {
-      const item = document.createElement("div");
-      item.className = "session-item" + (state.current?.id === s.id ? " active" : "");
-      item.innerHTML = `
-        <span class="dot ${s.busy ? "busy" : ""}"></span>
-        <div class="s-main">
-          <div class="s-title">${esc(s.title)}</div>
-          <div class="s-meta">${s.busy
-            ? '<span class="busy-label">运行中</span><span class="spinner"></span>'
-            : `<span>空闲</span><span>${relTime(s.updated_at)}</span>`}</div>
-        </div>
-        <span class="acts">
-          <button title="重命名">✎</button>
-          <button title="删除">✕</button>
-        </span>`;
-      item.onclick = () => selectSession(s);
-      const [rnBtn, delBtn] = item.querySelectorAll(".acts button");
-      rnBtn.onclick = (e) => { e.stopPropagation(); openRename(s); };
-      delBtn.onclick = async (e) => {
-        e.stopPropagation();
-        if (!confirm(`删除会话「${s.title}」？`)) return;
-        await api(`/api/sessions/${s.id}`, { method: "DELETE" });
-        if (state.current?.id === s.id) { state.current = null; chatEl.innerHTML = ""; setTopbar(); }
-        loadSessions();
-      };
-      body.appendChild(item);
+  for (const [key, list] of ordered) el.appendChild(renderGroup(key, list));
+}
+function renderGroup(key, list) {
+  const standalone = key === "__standalone__";
+  const g = document.createElement("div");
+  g.className = "group" + (state.collapsed.has(key) ? " collapsed" : "");
+  const head = document.createElement("div");
+  head.className = "group-head";
+  head.innerHTML = `<span class="chev">▼</span><span class="gicon">${standalone ? "🗂" : "📁"}</span>
+    <span class="gname">${esc(projectLabel(key))}</span>
+    <span class="gpath">${esc(standalone ? "workspaces/*" : shortPath(key))}</span>
+    <span class="gcount">${list.length}</span>`;
+  head.onclick = () => {
+    g.classList.toggle("collapsed");
+    if (g.classList.contains("collapsed")) state.collapsed.add(key);
+    else state.collapsed.delete(key);
+    saveCollapsed();
+  };
+  g.appendChild(head);
+  const body = document.createElement("div");
+  body.className = "group-body";
+  for (const s of list) body.appendChild(renderSessionItem(s));
+  const add = document.createElement("div");
+  add.className = "session-item new-in";
+  add.innerHTML = `<span>＋</span><div class="s-main"><div class="s-title" style="color:inherit">${
+    standalone ? "新建独立会话" : "在此项目新建会话"}</div></div>`;
+  add.onclick = async () => {
+    try {
+      const { session } = await api("/api/sessions", {
+        method: "POST", body: { cwd: standalone ? "" : key },
+      });
+      await loadSessions();
+      selectSession(session);
+    } catch (e) { alert(e.message); }
+  };
+  body.appendChild(add);
+  g.appendChild(body);
+  return g;
+}
+function renderSessionItem(s) {
+  const item = document.createElement("div");
+  item.className = "session-item" + (state.current?.id === s.id ? " active" : "");
+  item.innerHTML = `
+    <span class="dot ${s.busy ? "busy" : ""}"></span>
+    <div class="s-main">
+      <div class="s-title">${esc(s.title)}</div>
+      <div class="s-meta">${s.busy
+        ? '<span class="busy-label">运行中</span><span class="spinner"></span>'
+        : `<span>空闲</span><span>${relTime(s.updated_at)}</span>`}</div>
+    </div>
+    <span class="acts">
+      <button title="重命名">✎</button>
+      <button title="删除">✕</button>
+    </span>`;
+  item.onclick = () => selectSession(s);
+  const [rnBtn, delBtn] = item.querySelectorAll(".acts button");
+  rnBtn.onclick = (e) => { e.stopPropagation(); openRename(s); };
+  // two-step inline confirm: native confirm() is silently suppressed in
+  // embedded browser panes, which made deletion appear broken
+  delBtn.onclick = async (e) => {
+    e.stopPropagation();
+    if (!delBtn.dataset.armed) {
+      delBtn.dataset.armed = "1";
+      delBtn.textContent = "确认删除";
+      delBtn.style.color = "var(--red)";
+      setTimeout(() => {
+        delBtn.dataset.armed = "";
+        delBtn.textContent = "✕";
+        delBtn.style.color = "";
+      }, 3000);
+      return;
     }
-    g.appendChild(body);
-    el.appendChild(g);
-  }
+    try {
+      await api(`/api/sessions/${s.id}`, { method: "DELETE" });
+    } catch (err) {
+      addWarnBanner("删除会话失败: " + err.message);
+      return;
+    }
+    if (state.current?.id === s.id) { state.current = null; chatEl.innerHTML = ""; setTopbar(); }
+    loadSessions();
+  };
+  return item;
 }
 function setTopbar() {
   const s = state.current;
@@ -885,10 +1091,9 @@ async function selectSession(s) {
       if (m.role === "user") addUserMsg(m.text);
       else if (m.role === "assistant") {
         const turn = newAssistantTurn();
-        if (m.reasoning) appendReasoning(m.reasoning);
+        if (m.reasoning) addHistoryThink(turn, m.reasoning);
         if (m.text) appendAiText(m.text);
         for (const c of m.tool_calls) addToolCard(c);
-        void turn;
       } else if (m.role === "tool") {
         setToolResult(m.tool_call_id, m.name, m.text, m.status);
       }
@@ -962,43 +1167,144 @@ async function doRename() {
   loadSessions();
 }
 
-// ------------------------------------------------------------ model chip + menu
-function currentModelLabel() {
-  const s = state.current;
-  if (s?.model) return s.model.model;
-  return state.config?.defaultModel?.model ?? "未配置模型";
+// ------------------------------------------------------------ model chip + project config popover
+function currentProjectKey() {
+  return state.current ? projectKeyOf(state.current.cwd) : null;
+}
+function projectEntry(key) {
+  return (key && state.config?.projectConfig?.[key]) || {};
+}
+function effectiveModel(key) {
+  return projectEntry(key).model || state.config?.defaultModel || null;
 }
 function renderModelChip() {
   const chip = $("model-chip");
-  chip.childNodes[0].textContent = currentModelLabel() + " ▾";
+  const key = currentProjectKey();
+  const m = effectiveModel(key);
+  const parts = [m ? m.model : "未配置模型"];
+  const p = projectEntry(key).params ?? {};
+  if (p.thinking === "on") parts.push("思考开");
+  if (p.thinking === "off") parts.push("思考关");
+  if (p.temperature != null) parts.push("T " + p.temperature);
+  chip.childNodes[0].textContent = parts.join(" · ") + " ▾";
+}
+async function saveProjectConfig(patch) {
+  const key = currentProjectKey();
+  if (!key) return;
+  try {
+    const res = await api("/api/project-config", { method: "POST", body: { key, ...patch } });
+    state.config.projectConfig ??= {};
+    state.config.projectConfig[key] = res.config;
+  } catch (e) { alert("保存失败: " + e.message); }
+  renderModelChip();
+  await renderModelMenu();
 }
 async function renderModelMenu() {
   const menu = $("model-menu");
+  const key = currentProjectKey();
+  if (!key) { menu.innerHTML = ""; return; }
   const { providers } = await api("/api/providers");
-  const cur = state.current?.model;
-  let html = `<div class="m-item" data-def="1"><span>默认（${esc(state.config?.defaultModel?.model ?? "—")}）</span>${!cur ? '<span class="check">✓</span>' : ""}</div>`;
+  const entry = projectEntry(key);
+  const own = entry.model ?? null;
+  const params = entry.params ?? {};
+  const def = state.config?.defaultModel;
+  const th = params.thinking ?? null;
+  const effort = ["low", "high", "max"].includes(params.thinkingEffort)
+    ? params.thinkingEffort : "high";
+  // provider dialect of the effective model decides which params are shown
+  const effProvider = providers.find((p) => p.name === (own ?? def)?.provider);
+  const provType = effProvider?.type
+    ?? (/deepseek/i.test(effProvider?.baseUrl ?? "") ? "deepseek" : "openai");
+
+  let html = `<div class="m-sec">模型 <span class="proj-tag">${esc(projectLabel(key))}</span></div>`;
+  html += `<div class="m-item" data-def="1"><span>跟随全局默认（${esc(def?.model ?? "—")}）</span>${
+    !own ? '<span class="check">✓</span>' : ""}</div>`;
   for (const p of providers.filter(p => p.enabled)) {
     html += `<div class="m-group">${esc(p.name)}</div>`;
     for (const m of p.models) {
-      const on = cur && cur.provider === p.name && cur.model === m;
+      const on = own && own.provider === p.name && own.model === m;
       html += `<div class="m-item" data-p="${esc(p.name)}" data-m="${esc(m)}">
         <span>${esc(m)}</span>${on ? '<span class="check">✓</span>' : ""}</div>`;
     }
   }
+  html += `<hr>
+    <div class="m-sec">项目参数</div>`;
+  if (provType === "deepseek") {
+    html += `
+    <div class="param">
+      <div class="p-head"><span>思考</span><span class="p-val">DeepSeek 默认开</span></div>
+      <div class="seg" id="pp-think">
+        <button data-v="" class="${th === null ? "on" : ""}">默认</button>
+        <button data-v="on" class="${th === "on" ? "on" : ""}">开</button>
+        <button data-v="off" class="${th === "off" ? "on" : ""}">关</button>
+      </div>
+      ${th === "on" ? `<div class="seg" id="pp-effort" style="margin-top:6px">
+        <button data-v="low" class="${effort === "low" ? "on" : ""}">低</button>
+        <button data-v="high" class="${effort === "high" ? "on" : ""}">高</button>
+        <button data-v="max" class="${effort === "max" ? "on" : ""}">最大</button>
+      </div>` : ""}
+    </div>`;
+  }
+  html += `
+    <div class="param">
+      <div class="p-head"><span>温度</span>
+        <span class="p-val" id="pp-temp-val">${params.temperature != null ? params.temperature : "默认"}</span>
+        ${params.temperature != null ? '<button class="p-reset" id="pp-temp-reset" type="button">重置</button>' : ""}
+      </div>
+      <input type="range" id="pp-temp" min="0" max="20"
+        value="${params.temperature != null ? Math.round(params.temperature * 10) : 10}">
+    </div>
+    <div class="param">
+      <div class="p-head"><span>最大输出</span>
+        <input type="number" id="pp-maxtok" min="1" placeholder="默认" value="${params.maxTokens ?? ""}">
+      </div>
+    </div>
+    <div class="pop-foot">模型与参数保存在项目上，对项目下所有会话生效；「独立会话」视为一个虚拟项目。${
+      provType === "deepseek" ? "DeepSeek 思考开启时，温度等采样参数会被忽略。" : ""}</div>`;
   menu.innerHTML = html;
+
+  const curParams = () => ({ ...params });
   for (const item of menu.querySelectorAll(".m-item")) {
-    item.onclick = async (e) => {
+    item.onclick = (e) => {
       e.stopPropagation();
-      menu.classList.remove("open");
-      if (!state.current) return;
-      const body = item.dataset.def
+      saveProjectConfig(item.dataset.def
         ? { model: null }
-        : { model: { provider: item.dataset.p, model: item.dataset.m } };
-      const { session } = await api(`/api/sessions/${state.current.id}`, { method: "PATCH", body });
-      state.current = { ...state.current, ...session };
-      renderModelChip();
+        : { model: { provider: item.dataset.p, model: item.dataset.m } });
     };
   }
+  menu.querySelectorAll("#pp-think button").forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const p2 = curParams();
+      if (b.dataset.v) p2.thinking = b.dataset.v; else delete p2.thinking;
+      saveProjectConfig({ params: p2 });
+    };
+  });
+  menu.querySelectorAll("#pp-effort button").forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      saveProjectConfig({ params: { ...curParams(), thinkingEffort: b.dataset.v } });
+    };
+  });
+  const temp = menu.querySelector("#pp-temp");
+  temp.oninput = () => {
+    menu.querySelector("#pp-temp-val").textContent = (temp.value / 10).toFixed(1);
+  };
+  temp.onchange = () => saveProjectConfig({ params: { ...curParams(), temperature: temp.value / 10 } });
+  menu.querySelector("#pp-temp-reset")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const p2 = curParams();
+    delete p2.temperature;
+    saveProjectConfig({ params: p2 });
+  });
+  const mt = menu.querySelector("#pp-maxtok");
+  mt.onclick = (e) => e.stopPropagation();
+  mt.onchange = () => {
+    const p2 = curParams();
+    const v = parseInt(mt.value, 10);
+    if (v > 0) p2.maxTokens = v; else delete p2.maxTokens;
+    saveProjectConfig({ params: p2 });
+  };
 }
 
 // ------------------------------------------------------------ skills chip
@@ -1075,8 +1381,15 @@ function renderProviderDetail() {
   const box = $("prov-detail");
   const p = state.providers[state.selectedProvider];
   if (!p) { box.innerHTML = '<div class="hint" style="color:var(--text-dim)">尚未配置任何服务商</div>'; return; }
+  const pvType = p.type ?? (/deepseek/i.test(p.baseUrl ?? "") ? "deepseek" : "openai");
   box.innerHTML = `
     <div class="field"><label>名称</label><input type="text" id="pv-name" value="${esc(p.name)}"></div>
+    <div class="field"><label>类型（决定支持哪些参数，如思考开关）</label>
+      <select id="pv-type">
+        <option value="openai" ${pvType === "openai" ? "selected" : ""}>OpenAI 兼容（通用）</option>
+        <option value="deepseek" ${pvType === "deepseek" ? "selected" : ""}>DeepSeek</option>
+      </select>
+    </div>
     <div class="field"><label>API 地址</label><input type="text" id="pv-url" class="mono" value="${esc(p.baseUrl)}" placeholder="https://api.deepseek.com"></div>
     <div class="field"><label>API 密钥</label>
       <div class="row2">
@@ -1116,6 +1429,7 @@ function renderProviderDetail() {
     };
     models.appendChild(row);
   });
+  box.querySelector("#pv-type").onchange = (e) => { p.type = e.target.value; state.providersDirty = true; $("save-bar").classList.add("dirty"); };
   box.querySelector("#pv-name").oninput = (e) => { p.name = e.target.value; state.providersDirty = true; $("save-bar").classList.add("dirty"); };
   box.querySelector("#pv-name").onchange = () => renderProviders();
   box.querySelector("#pv-url").oninput = (e) => { p.baseUrl = e.target.value.trim(); state.providersDirty = true; $("save-bar").classList.add("dirty"); };
@@ -1545,6 +1859,7 @@ for (const nav of document.querySelectorAll(".nav-item")) {
 }
 $("model-chip").onclick = async (e) => {
   if (e.target.closest("#model-menu")) return;
+  if (!state.current) return;
   const menu = $("model-menu");
   if (menu.classList.contains("open")) { menu.classList.remove("open"); return; }
   await renderModelMenu();

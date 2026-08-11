@@ -4,9 +4,15 @@
  * Providers live in the settings table as a JSON array:
  *   [{ name, enabled, baseUrl, apiKey, models: [string], defaultModel }]
  *
+ * Model selection and generation params both follow the *project* (a project
+ * is a working directory; sessions in auto-created workspaces share the
+ * virtual project "__standalone__"). Stored in settings.projectConfig:
+ *   { [projectKey]: { model: {provider, model} | null,
+ *                     params: { thinking?, thinkingEffort?, temperature?, maxTokens? } } }
+ *
  * Resolution order for the model used by a session:
- *   session.model ({provider, model}) -> settings.defaultModel -> first
- *   enabled provider's default model -> .env (MODEL_BASE_URL/KEY/NAME).
+ *   projectConfig[key].model -> settings.defaultModel -> first enabled
+ *   provider's default model -> .env (MODEL_BASE_URL/KEY/NAME).
  */
 
 /** Provider list derived from .env, used to seed first run / as fallback. */
@@ -50,16 +56,18 @@ export function validateProviders(providers) {
 }
 
 /**
- * Resolve which concrete model a session should use.
+ * Resolve which concrete model a project (working directory) should use.
+ * @param {string|null} projectKey  cwd, "__standalone__", or null for the global default
  * @returns {{provider: string, model: string, baseUrl: string, apiKey: string}}
  */
-export function resolveModel(db, session) {
+export function resolveModel(db, projectKey = null) {
   const providers = getProviders(db).filter((p) => p.enabled);
   const byName = (name) => providers.find((p) => p.name === name);
 
   const candidates = [];
-  if (session?.model) {
-    try { candidates.push(JSON.parse(session.model)); } catch {}
+  if (projectKey) {
+    const pc = db.getSetting("projectConfig", {});
+    if (pc[projectKey]?.model) candidates.push(pc[projectKey].model);
   }
   const def = db.getSetting("defaultModel");
   if (def) candidates.push(def);
@@ -73,15 +81,50 @@ export function resolveModel(db, session) {
   for (const c of candidates) {
     const p = c?.provider && byName(c.provider);
     if (p && c.model && p.models.includes(c.model)) {
-      return { provider: p.name, model: c.model, baseUrl: p.baseUrl, apiKey: p.apiKey };
+      return {
+        provider: p.name, model: c.model, baseUrl: p.baseUrl, apiKey: p.apiKey,
+        type: providerTypeOf(p),
+      };
     }
   }
 
   const env = envProvider();
   if (env) {
-    return { provider: env.name, model: env.models[0], baseUrl: env.baseUrl, apiKey: env.apiKey };
+    return {
+      provider: env.name, model: env.models[0], baseUrl: env.baseUrl, apiKey: env.apiKey,
+      type: providerTypeOf(env),
+    };
   }
   throw new Error("没有可用的模型：请在设置 → 模型服务中配置服务商，或在 .env 中配置 MODEL_*");
+}
+
+/**
+ * Provider API dialect. Explicit `type` wins; otherwise inferred from the
+ * base URL. Currently only "deepseek" gets special treatment (thinking mode);
+ * everything else is plain "openai"-compatible.
+ */
+export function providerTypeOf(p) {
+  if (p?.type) return p.type;
+  return /deepseek/i.test(p?.baseUrl ?? "") ? "deepseek" : "openai";
+}
+
+/**
+ * Resolve generation params for a project. Fields left null mean
+ * "not overridden — follow the model/provider default".
+ * @returns {{thinking: null|"on"|"off", thinkingEffort: "low"|"medium"|"high",
+ *            temperature: number|null, maxTokens: number|null}}
+ */
+export function resolveParams(db, projectKey) {
+  const pc = db.getSetting("projectConfig", {});
+  const p = (projectKey && pc[projectKey]?.params) || {};
+  return {
+    thinking: p.thinking === "on" || p.thinking === "off" ? p.thinking : null,
+    // DeepSeek effort levels: low / high / max ("medium" is a legacy value)
+    thinkingEffort: ["low", "high", "max"].includes(p.thinkingEffort)
+      ? p.thinkingEffort : "high",
+    temperature: p.temperature ?? null,
+    maxTokens: p.maxTokens ?? null,
+  };
 }
 
 /** Quick connectivity + basic-completion test against an OpenAI-compatible API. */

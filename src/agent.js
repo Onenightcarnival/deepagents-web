@@ -20,8 +20,12 @@ Rules:
 /**
  * @param {{baseUrl: string, apiKey: string, model: string}} resolved
  *   Concrete model config (see providers.js resolveModel).
+ * @param {{thinking?: null|"on"|"off", thinkingEffort?: string,
+ *          temperature?: number|null, maxTokens?: number|null}} [params]
+ *   Project-level generation params (see providers.js resolveParams).
+ *   null fields are not sent, so the provider default applies.
  */
-export function buildModel(resolved) {
+export function buildModel(resolved, params = {}) {
   const { baseUrl, apiKey, model } = resolved;
   if (!baseUrl || !apiKey || !model) {
     throw new Error("模型配置不完整：请在设置 → 模型服务中配置，或在 .env 中配置 MODEL_*");
@@ -35,9 +39,27 @@ export function buildModel(resolved) {
     configuration: { baseURL: baseUrl },
     maxRetries: Number(process.env.MODEL_MAX_RETRIES ?? 2),
   };
-  if (process.env.MODEL_TEMPERATURE !== undefined && process.env.MODEL_TEMPERATURE !== "") {
+  if (params.temperature != null) {
+    opts.temperature = Number(params.temperature);
+  } else if (process.env.MODEL_TEMPERATURE !== undefined && process.env.MODEL_TEMPERATURE !== "") {
     opts.temperature = Number(process.env.MODEL_TEMPERATURE);
   }
+  if (params.maxTokens != null) opts.maxTokens = Number(params.maxTokens);
+  // Thinking control is provider-specific; only sent when explicitly overridden.
+  // DeepSeek (V4 API): body-level `thinking: {type}` + `reasoning_effort`
+  // (low/high/max, default high). In thinking mode DeepSeek ignores
+  // temperature/top_p — no error, just no effect.
+  const modelKwargs = {};
+  if (resolved.type === "deepseek") {
+    if (params.thinking === "on") {
+      modelKwargs.thinking = { type: "enabled" };
+      const effort = params.thinkingEffort === "medium" ? "high" : params.thinkingEffort;
+      modelKwargs.reasoning_effort = effort ?? "high";
+    } else if (params.thinking === "off") {
+      modelKwargs.thinking = { type: "disabled" };
+    }
+  }
+  if (Object.keys(modelKwargs).length) opts.modelKwargs = modelKwargs;
   return new ChatOpenAI(opts);
 }
 
@@ -65,9 +87,10 @@ function buildInterruptOn(approvalMode, mcpToolNames) {
  * @param {Array}  opts.mcpServers     MCP server configs from the app db
  * @param {string} opts.approvalMode   "off" | "dangerous" | "dangerous+mcp" | "all"
  * @param {object} opts.model          resolved model config {baseUrl, apiKey, model}
+ * @param {object} [opts.params]       project-level generation params
  * @param {string[]} [opts.skillDirs]  absolute skill source directories
  */
-export async function buildAgent({ cwd, checkpointer, mcpServers, approvalMode, model, skillDirs }) {
+export async function buildAgent({ cwd, checkpointer, mcpServers, approvalMode, model, params, skillDirs }) {
   const { tools: mcpTools, errors: mcpErrors } = await getMcpTools(mcpServers ?? []);
 
   const backend = new LocalShellBackend({
@@ -81,7 +104,7 @@ export async function buildAgent({ cwd, checkpointer, mcpServers, approvalMode, 
   const skills = (skillDirs ?? []).filter((d) => existsSync(d)).map((d) => (d.endsWith("/") ? d : d + "/"));
 
   const agent = createDeepAgent({
-    model: buildModel(model),
+    model: buildModel(model, params),
     backend,
     tools: mcpTools,
     systemPrompt: SYSTEM_PROMPT,
