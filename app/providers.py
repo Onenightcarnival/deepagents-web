@@ -11,41 +11,16 @@ virtual project "__standalone__"). Stored in settings.projectConfig:
 
 Resolution order for the model used by a session:
   projectConfig[key].model -> settings.defaultModel -> first enabled
-  provider's default model -> .env (MODEL_BASE_URL/KEY/NAME).
+  provider's default model.
 """
-import os
 import re
 import time
 
 import httpx
 
 
-def env_provider() -> dict | None:
-    """Provider derived from .env, used to seed first run / as fallback."""
-    base_url = os.environ.get("MODEL_BASE_URL")
-    api_key = os.environ.get("MODEL_API_KEY")
-    model = os.environ.get("MODEL_NAME")
-    if not (base_url and api_key and model):
-        return None
-    return {
-        "name": "默认服务商",
-        "enabled": True,
-        "baseUrl": base_url,
-        "apiKey": api_key,
-        "models": [model],
-        "defaultModel": model,
-    }
-
-
 def get_providers(db) -> list[dict]:
-    """Read providers from the db, seeding from .env on first use."""
-    providers = db.get_setting("providers")
-    if providers is None:
-        seed = env_provider()
-        providers = [seed] if seed else []
-        if seed:
-            db.set_setting("providers", providers)
-    return providers
+    return db.get_setting("providers") or []
 
 
 def validate_providers(providers) -> str | None:
@@ -112,14 +87,7 @@ def resolve_model(db, project_key: str | None = None) -> dict:
                 "type": provider_type_of(p),
             }
 
-    env = env_provider()
-    if env:
-        return {
-            "provider": env["name"], "model": env["models"][0],
-            "baseUrl": env["baseUrl"], "apiKey": env["apiKey"],
-            "type": provider_type_of(env),
-        }
-    raise RuntimeError("没有可用的模型：请在设置 → 模型服务中配置服务商，或在 .env 中配置 MODEL_*")
+    raise RuntimeError("没有可用的模型：请在设置 → 模型服务中配置服务商")
 
 
 def resolve_params(db, project_key: str | None) -> dict:
@@ -145,7 +113,7 @@ async def test_provider(base_url: str, api_key: str, model: str) -> dict:
         return int((time.monotonic() - started) * 1000)
 
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=20.0, trust_env=False, verify=False) as client:
             res = await client.post(
                 base_url.rstrip("/") + "/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},

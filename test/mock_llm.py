@@ -2,11 +2,11 @@
 API key. Scripted behavior:
   - If the last message is not a tool result: call `execute` with an echo.
   - If a tool result is present: stream a short final text answer.
-Run: uv run python test/mock_llm.py  (listens on :8901)
+Run: uv run python test/mock_llm.py  (listens on :8901; see --help)
 """
+import argparse
 import asyncio
 import json
-import os
 import time
 import uuid
 
@@ -14,10 +14,10 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-PORT = int(os.environ.get("MOCK_PORT") or 8901)
-# per-word delay when streaming the final answer; raise it (e.g. 0.8) to
-# keep a run in-flight long enough to exercise detach/reattach flows
-DELAY = float(os.environ.get("MOCK_DELAY_MS") or 30) / 1000
+# per-word delay (seconds) when streaming the final answer; raise it (e.g.
+# --delay-ms 800) to keep a run in-flight long enough to exercise
+# detach/reattach flows
+settings = {"delay": 0.03}
 
 app = FastAPI()
 
@@ -51,7 +51,7 @@ async def completions(path: str, request: Request):
     messages = body.get("messages") or []
     has_tool_result = any(m.get("role") == "tool" for m in messages)
 
-    if body.get("stream") is False:
+    if not body.get("stream"):  # 与真实 API 一致：未显式要求流式则返回 JSON
         if has_tool_result:
             message = {"role": "assistant", "content": "命令已执行，见工具结果。"}
         else:
@@ -97,7 +97,7 @@ async def completions(path: str, request: Request):
             yield sse(chunk({"role": "assistant", "content": ""}))
             for word in ["命令", "已执行", "，输出", "见上方", "工具结果。"]:
                 yield sse(chunk({"content": word}))
-                await asyncio.sleep(DELAY)
+                await asyncio.sleep(settings["delay"])
             yield sse(chunk({}, "stop"))
         # usage chunk (as sent by OpenAI with stream_options.include_usage)
         yield sse({
@@ -113,5 +113,14 @@ async def completions(path: str, request: Request):
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
+def main() -> None:
+    parser = argparse.ArgumentParser(description="OpenAI-compatible mock LLM")
+    parser.add_argument("--port", type=int, default=8901)
+    parser.add_argument("--delay-ms", type=float, default=30)
+    args = parser.parse_args()
+    settings["delay"] = args.delay_ms / 1000
+    uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
+
+
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")
+    main()

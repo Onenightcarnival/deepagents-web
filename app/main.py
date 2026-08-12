@@ -2,25 +2,15 @@
 
   uv run python -m app.main      — serves the UI + API on http://127.0.0.1:3080
 
-Configuration via .env:
-  MODEL_BASE_URL / MODEL_API_KEY / MODEL_NAME   (required)
-  MODEL_TEMPERATURE, MODEL_MAX_RETRIES          (optional)
-  PORT (default 3080), HOST (default 127.0.0.1)
-  WORKSPACE_ROOT (default ./workspaces)
-  AUTH_TOKEN (optional — required for LAN exposure)
-  SHELL_TIMEOUT (seconds, default 300)
+Startup configuration lives in config.toml at the project root (optional,
+see config.example.toml); model providers are configured in the web UI.
 """
 import asyncio
 import contextlib
 import json
-import os
 import re
 import uuid
 from pathlib import Path
-
-from dotenv import load_dotenv
-
-load_dotenv()
 
 import aiosqlite
 import uvicorn
@@ -31,6 +21,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 
 from .agent import build_agent
+from .config import CONFIG, PUBLIC_DIR
 from .db import AppDb
 from .mcp import test_mcp_server
 from .providers import (
@@ -48,12 +39,11 @@ from .serialize import (
 )
 from .skills import expand_path, get_skill_dirs, read_skill_file, scan_skills
 
-PORT = int(os.environ.get("PORT") or 3080)
-HOST = os.environ.get("HOST") or "127.0.0.1"
-DATA_DIR = Path(os.environ.get("DATA_DIR") or "data").resolve()
-WORKSPACE_ROOT = str(Path(os.environ.get("WORKSPACE_ROOT") or "workspaces").resolve())
-AUTH_TOKEN = os.environ.get("AUTH_TOKEN") or None
-PUBLIC_DIR = Path(__file__).resolve().parent.parent / "public"
+PORT = CONFIG.port
+HOST = CONFIG.host
+DATA_DIR = CONFIG.data_dir
+WORKSPACE_ROOT = str(CONFIG.workspace_root)
+AUTH_TOKEN = CONFIG.auth_token
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 Path(WORKSPACE_ROOT).mkdir(parents=True, exist_ok=True)

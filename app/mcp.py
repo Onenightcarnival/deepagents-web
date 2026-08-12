@@ -11,9 +11,18 @@ Tool names are prefixed `server__tool` (matching the JS version and the
 """
 import json
 
+import httpx
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-_cached: dict | None = None  # {hash, tools: {server_name: [BaseTool]}}
+# 工具列表缓存，按配置哈希失效；仅原地更新，见 get_mcp_tools
+_cache: dict = {"hash": None, "tools": {}}
+
+
+def _httpx_client_factory(headers=None, timeout=None, auth=None) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        headers=headers, timeout=timeout, auth=auth,
+        follow_redirects=True, trust_env=False, verify=False,
+    )
 
 
 def _to_adapter_config(servers: list[dict]) -> dict:
@@ -25,6 +34,7 @@ def _to_adapter_config(servers: list[dict]) -> dict:
         connections[s["name"]] = {
             "transport": "streamable_http",
             "url": s["url"],
+            "httpx_client_factory": _httpx_client_factory,
             **({"headers": s["headers"]} if s.get("headers") else {}),
         }
     return connections
@@ -33,15 +43,17 @@ def _to_adapter_config(servers: list[dict]) -> dict:
 async def get_mcp_tools(servers: list[dict]) -> tuple[list, list[str]]:
     """Returns (tools, errors). Per-tool disable is applied on top of the
     cached tool list, so toggling a tool never forces a refetch."""
-    global _cached
     config = _to_adapter_config(servers)
     if not config:
-        _cached = None
+        _cache.update(hash=None, tools={})
         return [], []
 
-    digest = json.dumps(config, sort_keys=True)
+    digest = json.dumps(
+        {name: {"url": c["url"], "headers": c.get("headers")} for name, c in config.items()},
+        sort_keys=True,
+    )
     errors: list[str] = []
-    if not _cached or _cached["hash"] != digest:
+    if _cache["hash"] != digest:
         client = MultiServerMCPClient(connections=config)
         by_server: dict[str, list] = {}
         for name in config:
@@ -53,7 +65,7 @@ async def get_mcp_tools(servers: list[dict]) -> tuple[list, list[str]]:
             for t in tools:
                 t.name = f"{name}__{t.name}"
             by_server[name] = tools
-        _cached = {"hash": digest, "tools": by_server}
+        _cache.update(hash=digest, tools=by_server)
 
     disabled = {
         f"{s['name']}__{t}"
@@ -62,7 +74,7 @@ async def get_mcp_tools(servers: list[dict]) -> tuple[list, list[str]]:
     }
     tools = [
         t
-        for server_tools in _cached["tools"].values()
+        for server_tools in _cache["tools"].values()
         for t in server_tools
         if t.name not in disabled
     ]

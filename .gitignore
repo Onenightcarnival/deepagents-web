@@ -2,6 +2,7 @@
 __pycache__/
 data/
 workspaces/
+config.toml
 .env
 *.log
 .DS_Store

@@ -1,15 +1,16 @@
 """Deep agent construction: custom OpenAI-compatible model + local shell
 backend + human-in-the-loop approvals + MCP tools + SQLite checkpointer.
 """
-import os
 from pathlib import Path
 
+import httpx
 from deepagents import create_deep_agent
 from deepagents.backends import LocalShellBackend
 from langchain.agents.middleware import TodoListMiddleware
 from langchain_deepseek import ChatDeepSeek
 from langchain_openai import ChatOpenAI
 
+from .config import CONFIG
 from .mcp import get_mcp_tools
 
 SYSTEM_PROMPT = """You are a capable coding and general-purpose agent running on the user's machine, similar to Codex or Claude Code.
@@ -30,17 +31,18 @@ def build_model(resolved: dict, params: dict | None = None):
     params = params or {}
     base_url, api_key, model = resolved.get("baseUrl"), resolved.get("apiKey"), resolved.get("model")
     if not (base_url and api_key and model):
-        raise RuntimeError("模型配置不完整：请在设置 → 模型服务中配置，或在 .env 中配置 MODEL_*")
+        raise RuntimeError("模型配置不完整：请在设置 → 模型服务中配置")
 
     kwargs: dict = {
         "model": model,
         "api_key": api_key,
-        "max_retries": int(os.environ.get("MODEL_MAX_RETRIES") or 2),
+        "max_retries": CONFIG.model_max_retries,
+        # 自定义 httpx 客户端：屏蔽系统代理（trust_env）并跳过证书校验
+        "http_client": httpx.Client(trust_env=False, verify=False),
+        "http_async_client": httpx.AsyncClient(trust_env=False, verify=False),
     }
     if params.get("temperature") is not None:
         kwargs["temperature"] = float(params["temperature"])
-    elif os.environ.get("MODEL_TEMPERATURE"):
-        kwargs["temperature"] = float(os.environ["MODEL_TEMPERATURE"])
     if params.get("maxTokens") is not None:
         kwargs["max_tokens"] = int(params["maxTokens"])
 
@@ -99,7 +101,7 @@ async def build_agent(
         root_dir=cwd,
         virtual_mode=False,
         inherit_env=True,
-        timeout=int(os.environ.get("SHELL_TIMEOUT") or 300),
+        timeout=CONFIG.shell_timeout,
         max_output_bytes=200_000,
     )
 
