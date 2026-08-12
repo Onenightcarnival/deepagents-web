@@ -1,12 +1,13 @@
 """MCP 服务器：配置增删、连接测试。"""
+
 import re
 
 from fastapi import APIRouter, Request
 from pydantic import ValidationError
 
-from ..utils.app_config import json_error, validation_error_message
-from . import service
-from .template import McpTestBody, McpUpsertBody
+from src.mcp import service
+from src.mcp.template import McpTestBody, McpUpsertBody
+from src.utils.app_config import json_error, validation_error_message
 
 router = APIRouter(prefix="/api")
 

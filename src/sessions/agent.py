@@ -1,8 +1,8 @@
 """Deep agent construction: custom OpenAI-compatible model + local shell
 backend + human-in-the-loop approvals + MCP tools + SQLite checkpointer.
 """
-from pathlib import Path
 
+import anyio
 import httpx
 from deepagents import create_deep_agent
 from deepagents.backends import LocalShellBackend
@@ -10,16 +10,19 @@ from langchain.agents.middleware import TodoListMiddleware
 from langchain_deepseek import ChatDeepSeek
 from langchain_openai import ChatOpenAI
 
-from ..mcp.service import get_mcp_tools
-from ..utils.resource_loader import CONFIG
+from src.mcp.service import get_mcp_tools
+from src.utils.resource_loader import CONFIG
 
-SYSTEM_PROMPT = """You are a capable coding and general-purpose agent running on the user's machine, similar to Codex or Claude Code.
+SYSTEM_PROMPT = """You are a capable coding and general-purpose agent running on the user's machine,
+similar to Codex or Claude Code.
 
 Rules:
 - The working directory is the user's project directory. Prefer relative paths inside it.
-- Use the filesystem tools (ls, read_file, write_file, edit_file, glob, grep) to inspect and modify files, and `execute` to run shell commands.
+- Use the filesystem tools (ls, read_file, write_file, edit_file, glob, grep) to inspect and modify files,
+  and `execute` to run shell commands.
 - For multi-step work, maintain a todo list with write_todos and keep it updated as you progress.
-- Before destructive operations (deleting files, force-pushing, overwriting uncommitted work), explain what you are about to do.
+- Before destructive operations (deleting files, force-pushing, overwriting uncommitted work),
+  explain what you are about to do.
 - Reply in the same language the user writes in.
 - Keep final answers concise; the user can see tool outputs in the UI."""
 
@@ -106,11 +109,10 @@ async def build_agent(
     )
 
     # only pass skill dirs that exist — SkillsMiddleware errors on missing paths
-    skills = [
-        d if d.endswith("/") else d + "/"
-        for d in (skill_dirs or [])
-        if Path(d).exists()
-    ]
+    skills = []
+    for d in skill_dirs or []:
+        if await anyio.Path(d).exists():
+            skills.append(d if d.endswith("/") else d + "/")
 
     agent = create_deep_agent(
         model=build_model(model, params),

@@ -1,4 +1,5 @@
 """技能模块的出入参 pydantic 模型。"""
+
 from pydantic import BaseModel, field_validator
 
 

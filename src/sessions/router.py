@@ -1,22 +1,23 @@
 """会话：增删改查、消息发送、审批恢复、SSE 附着、停止、最近目录。"""
+
 import asyncio
 import contextlib
 import json
 import re
 import uuid
-from pathlib import Path
 
+import anyio
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from langgraph.types import Command
 from pydantic import ValidationError
 
-from ..utils.app_config import json_error, validation_error_message
-from ..utils.resource_loader import CONFIG, resources
-from . import service
-from .serialize import serialize_history, serialize_task_interrupts
-from .service import Run, active_run, public_session, thread_config
-from .template import CreateSessionBody, MessageBody, PatchSessionBody, ResumeBody
+from src.sessions import service
+from src.sessions.serialize import serialize_history, serialize_task_interrupts
+from src.sessions.service import Run, active_run, public_session, thread_config
+from src.sessions.template import CreateSessionBody, MessageBody, PatchSessionBody, ResumeBody
+from src.utils.app_config import json_error, validation_error_message
+from src.utils.resource_loader import CONFIG, resources
 
 router = APIRouter(prefix="/api")
 
@@ -40,12 +41,7 @@ async def recent_dirs():
 
 @router.get("/sessions")
 async def list_sessions():
-    return {
-        "sessions": [
-            {**public_session(s), "busy": bool(active_run(s["id"]))}
-            for s in service.list_sessions()
-        ]
-    }
+    return {"sessions": [{**public_session(s), "busy": bool(active_run(s["id"]))} for s in service.list_sessions()]}
 
 
 @router.post("/sessions")
@@ -57,12 +53,12 @@ async def create_session(request: Request):
     id = str(uuid.uuid4())
     cwd = (body.cwd or "").strip()
     if cwd:
-        cwd = str(Path(cwd).expanduser().resolve())
-        if not Path(cwd).exists():
+        cwd = str(await (await anyio.Path(cwd).expanduser()).resolve())
+        if not await anyio.Path(cwd).exists():
             return json_error(f"directory not found: {cwd}")
     else:
         cwd = str(CONFIG.paths.workspace_root / id[:8])
-        Path(cwd).mkdir(parents=True, exist_ok=True)
+        await anyio.Path(cwd).mkdir(parents=True, exist_ok=True)
     session = service.create_session(id, (body.title or "").strip() or "New session", cwd)
     return {"session": public_session(session)}
 

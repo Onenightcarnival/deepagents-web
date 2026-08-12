@@ -3,9 +3,10 @@
 存放内容：providers（服务商列表）、defaultModel、approvalMode、
 projectConfig（项目级模型与参数）、skillDirs。
 """
+
 from sqlalchemy.orm import Mapped, mapped_column
 
-from ..utils.database import Base
+from src.utils.database import Base
 
 
 class SettingRecord(Base):

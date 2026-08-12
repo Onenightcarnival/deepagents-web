@@ -2,9 +2,10 @@
 
 config 为 JSON TEXT：{transport: "http", url, headers?, disabledTools?}。
 """
+
 from sqlalchemy.orm import Mapped, mapped_column
 
-from ..utils.database import Base
+from src.utils.database import Base
 
 
 class McpServerRecord(Base):

@@ -11,12 +11,13 @@
 会话所用模型的解析顺序：
   projectConfig[key].model -> settings.defaultModel -> 第一个启用服务商的默认模型
 """
+
 import re
 import time
 
 import httpx
 
-from ..settings.service import get_setting
+from src.settings.service import get_setting
 
 
 def get_providers() -> list[dict]:
@@ -72,17 +73,21 @@ def resolve_model(project_key: str | None = None) -> dict:
         candidates.append(default)
     if providers:
         first = providers[0]
-        candidates.append({
-            "provider": first["name"],
-            "model": first.get("defaultModel") or first["models"][0],
-        })
+        candidates.append(
+            {
+                "provider": first["name"],
+                "model": first.get("defaultModel") or first["models"][0],
+            }
+        )
 
     for c in candidates:
         p = by_name(c.get("provider")) if c and c.get("provider") else None
         if p and c.get("model") and c["model"] in (p.get("models") or []):
             return {
-                "provider": p["name"], "model": c["model"],
-                "baseUrl": p["baseUrl"], "apiKey": p.get("apiKey") or "",
+                "provider": p["name"],
+                "model": c["model"],
+                "baseUrl": p["baseUrl"],
+                "apiKey": p.get("apiKey") or "",
                 "type": provider_type_of(p),
             }
 
@@ -96,8 +101,7 @@ def resolve_params(project_key: str | None) -> dict:
     return {
         "thinking": p.get("thinking") if p.get("thinking") in ("on", "off") else None,
         # DeepSeek effort levels: low / high / max ("medium" is a legacy value)
-        "thinkingEffort": p["thinkingEffort"]
-        if p.get("thinkingEffort") in ("low", "high", "max") else "high",
+        "thinkingEffort": p["thinkingEffort"] if p.get("thinkingEffort") in ("low", "high", "max") else "high",
         "temperature": p.get("temperature"),
         "maxTokens": p.get("maxTokens"),
     }
@@ -122,8 +126,7 @@ async def test_provider(base_url: str, api_key: str, model: str) -> dict:
                 },
             )
         if res.status_code != 200:
-            return {"ok": False, "latencyMs": latency(),
-                    "error": f"HTTP {res.status_code}: {res.text[:300]}"}
+            return {"ok": False, "latencyMs": latency(), "error": f"HTTP {res.status_code}: {res.text[:300]}"}
         data = res.json()
         reply = ((data.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
         return {"ok": True, "latencyMs": latency(), "reply": str(reply)[:100]}

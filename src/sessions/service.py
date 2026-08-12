@@ -5,6 +5,7 @@
 保留在注册表中（直到被下一次运行替换），晚到的重连仍能看到结束状态。
 运行不跨服务重启存活。
 """
+
 import asyncio
 import contextlib
 import json
@@ -12,14 +13,14 @@ import time
 
 from sqlalchemy import select
 
-from ..mcp.service import list_mcp_servers
-from ..providers.service import resolve_model, resolve_params
-from ..settings.service import get_setting
-from ..skills.service import expand_path, get_skill_dirs
-from ..utils.resource_loader import CONFIG, resources
-from .agent import build_agent
-from .model import SessionRecord
-from .serialize import content_to_text, serialize_history, serialize_interrupt_values
+from src.mcp.service import list_mcp_servers
+from src.providers.service import resolve_model, resolve_params
+from src.sessions.agent import build_agent
+from src.sessions.model import SessionRecord
+from src.sessions.serialize import content_to_text, serialize_history, serialize_interrupt_values
+from src.settings.service import get_setting
+from src.skills.service import expand_path, get_skill_dirs
+from src.utils.resource_loader import CONFIG, resources
 
 
 def _now_ms() -> int:
@@ -45,9 +46,7 @@ def get_session(id: str) -> dict | None:
 
 def list_sessions() -> list[dict]:
     with resources.db_session() as s:
-        rows = s.scalars(
-            select(SessionRecord).order_by(SessionRecord.updated_at.desc())
-        ).all()
+        rows = s.scalars(select(SessionRecord).order_by(SessionRecord.updated_at.desc())).all()
         return [r.to_dict() for r in rows]
 
 
@@ -95,13 +94,13 @@ def public_session(s: dict | None) -> dict | None:
 
 class Run:
     def __init__(self):
-        self.events: list[dict] = []        # buffered for (re)attach replay
+        self.events: list[dict] = []  # buffered for (re)attach replay
         self.subscribers: set[asyncio.Queue] = set()
         self.task: asyncio.Task | None = None
         self.done = False
-        self.status = "running"             # running | done | error | aborted
+        self.status = "running"  # running | done | error | aborted
         self.error: str | None = None
-        self.cutoff = 0                     # serialized-history length when the run started
+        self.cutoff = 0  # serialized-history length when the run started
 
     def push(self, obj: dict):
         last = self.events[-1] if self.events else None
@@ -194,10 +193,12 @@ async def start_run(session: dict, input, user_text: str | None = None) -> Run:
                             run.push({"type": "reasoning_delta", "text": reasoning})
                 elif mode == "updates":
                     if "__interrupt__" in data:
-                        run.push({
-                            "type": "interrupt",
-                            "interrupts": serialize_interrupt_values(data["__interrupt__"]),
-                        })
+                        run.push(
+                            {
+                                "type": "interrupt",
+                                "interrupts": serialize_interrupt_values(data["__interrupt__"]),
+                            }
+                        )
                         continue
                     for update in data.values():
                         if not isinstance(update, dict):
@@ -209,22 +210,25 @@ async def start_run(session: dict, input, user_text: str | None = None) -> Run:
                         for m in update.get("messages") or []:
                             t = getattr(m, "type", None)
                             if t == "ai" and getattr(m, "tool_calls", None):
-                                run.push({
-                                    "type": "tool_calls",
-                                    "calls": [
-                                        {"id": c.get("id"), "name": c.get("name"),
-                                         "args": c.get("args")}
-                                        for c in m.tool_calls
-                                    ],
-                                })
+                                run.push(
+                                    {
+                                        "type": "tool_calls",
+                                        "calls": [
+                                            {"id": c.get("id"), "name": c.get("name"), "args": c.get("args")}
+                                            for c in m.tool_calls
+                                        ],
+                                    }
+                                )
                             elif t == "tool":
-                                run.push({
-                                    "type": "tool_result",
-                                    "id": m.tool_call_id,
-                                    "name": m.name,
-                                    "text": content_to_text(m.content)[:20000],
-                                    "status": getattr(m, "status", None) or "success",
-                                })
+                                run.push(
+                                    {
+                                        "type": "tool_result",
+                                        "id": m.tool_call_id,
+                                        "name": m.name,
+                                        "text": content_to_text(m.content)[:20000],
+                                        "status": getattr(m, "status", None) or "success",
+                                    }
+                                )
             touch_session(session["id"])
             run.status = "done"
             run.push({"type": "done"})

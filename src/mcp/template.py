@@ -1,4 +1,5 @@
 """MCP 模块的出入参 pydantic 模型。"""
+
 import re
 
 from pydantic import BaseModel, ConfigDict, field_validator

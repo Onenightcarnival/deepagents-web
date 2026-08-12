@@ -1,14 +1,15 @@
 """应用设置：全局配置、审批模式、项目级模型与生成参数。"""
+
 import contextlib
 
 from fastapi import APIRouter, Request
 from pydantic import ValidationError
 
-from ..providers.service import get_providers, resolve_model
-from ..utils.app_config import json_error, validation_error_message
-from ..utils.resource_loader import CONFIG
-from . import service
-from .template import ProjectConfigBody, ProjectParams, SettingsBody
+from src.providers.service import get_providers, resolve_model
+from src.settings import service
+from src.settings.template import ProjectConfigBody, ProjectParams, SettingsBody
+from src.utils.app_config import json_error, validation_error_message
+from src.utils.resource_loader import CONFIG
 
 router = APIRouter(prefix="/api")
 
@@ -57,8 +58,7 @@ async def post_project_config(request: Request):
     model = None
     if has_model and body.model is not None:
         p = next(
-            (x for x in get_providers()
-             if x.get("enabled") and x["name"] == body.model.provider),
+            (x for x in get_providers() if x.get("enabled") and x["name"] == body.model.provider),
             None,
         )
         if not p or body.model.model not in (p.get("models") or []):

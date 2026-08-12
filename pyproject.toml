@@ -16,5 +16,47 @@ dependencies = [
     "sqlalchemy>=2.0",
 ]
 
+[dependency-groups]
+dev = [
+    "ruff>=0.8",
+]
+
 [tool.uv]
 package = false
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",       # pycodestyle 错误
+    "W",       # pycodestyle 警告
+    "F",       # pyflakes（未使用变量、未定义名称等）
+    "I",       # isort 导入排序
+    "UP",      # pyupgrade（使用 3.12 新语法）
+    "B",       # bugbear（常见坑，如可变默认参数）
+    "ASYNC",   # 异步代码检查（FastAPI/aiosqlite 场景）
+    "FAST",    # FastAPI 专项检查
+    "SIM",     # 化简建议，避免难维护的写法
+    "RUF",     # ruff 自带规则
+    "TID251",  # banned-api：禁止 sys.path 打补丁
+    "TID252",  # 禁止相对导入
+    "PLC0415", # 禁止内联 import（SDK 依赖隔离场景用 noqa 豁免）
+    "PLW0602", # 禁止 global 声明
+    "PLW0603", # 禁止 global 赋值
+]
+ignore = [
+    "RUF001", # 中文全角标点误报
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"sys.path".msg = "禁止对 sys.path 等路径打补丁；项目顶层入口为根目录，需要打补丁说明目录结构不正确"
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]

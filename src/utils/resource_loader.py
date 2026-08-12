@@ -6,16 +6,21 @@
   注册表）在 import 时就绪；异步资源（LangGraph checkpointer 的 aiosqlite
   连接）由 FastAPI lifespan 阶段填充/关闭（见 utils/app_config.py）。
 """
+
 import argparse
 import sys
 import tomllib
-from pathlib import Path
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 
-from ..config.config_template import ROOT_DIR, AppConfig
-from .database import Base
+from src.config.config_template import ROOT_DIR, AppConfig
+
+# ORM 模型需在 create_all 前注册到 Base.metadata
+from src.mcp.model import McpServerRecord  # noqa: F401
+from src.sessions.model import SessionRecord  # noqa: F401
+from src.settings.model import SettingRecord  # noqa: F401
+from src.utils.database import Base
 
 PUBLIC_DIR = ROOT_DIR / "public"
 CONFIG_DIR = ROOT_DIR / "src" / "config"
@@ -49,11 +54,7 @@ def _init_engine(config: AppConfig):
         f"sqlite:///{config.paths.data_dir / 'app.db'}",
         connect_args={"check_same_thread": False},
     )
-    # 注册所有 ORM 模型后建表（WAL 属性随数据库文件持久化，设置一次即可）
-    from ..mcp.model import McpServerRecord  # noqa: F401
-    from ..sessions.model import SessionRecord  # noqa: F401
-    from ..settings.model import SettingRecord  # noqa: F401
-
+    # WAL 属性随数据库文件持久化，设置一次即可
     with engine.connect() as conn:
         conn.execute(text("PRAGMA journal_mode=WAL"))
     Base.metadata.create_all(engine)

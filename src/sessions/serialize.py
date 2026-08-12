@@ -57,18 +57,18 @@ def serialize_interrupt_values(interrupts) -> list[dict]:
     out = []
     for intr in interrupts or []:
         v = getattr(intr, "value", None) or {}
-        out.append({
-            "actionRequests": [
-                {"name": a.get("name"), "args": a.get("args"),
-                 "description": a.get("description")}
-                for a in (v.get("action_requests") or [])
-            ],
-            "reviewConfigs": [
-                {"actionName": r.get("action_name"),
-                 "allowedDecisions": r.get("allowed_decisions")}
-                for r in (v.get("review_configs") or [])
-            ],
-        })
+        out.append(
+            {
+                "actionRequests": [
+                    {"name": a.get("name"), "args": a.get("args"), "description": a.get("description")}
+                    for a in (v.get("action_requests") or [])
+                ],
+                "reviewConfigs": [
+                    {"actionName": r.get("action_name"), "allowedDecisions": r.get("allowed_decisions")}
+                    for r in (v.get("review_configs") or [])
+                ],
+            }
+        )
     return out
 
 

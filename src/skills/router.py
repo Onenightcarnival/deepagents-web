@@ -1,11 +1,12 @@
 """技能：目录配置、扫描、SKILL.md 查看。"""
+
 from fastapi import APIRouter, Request
 from pydantic import ValidationError
 
-from ..settings.service import set_setting
-from ..utils.app_config import json_error
-from . import service
-from .template import SkillDirsBody
+from src.settings.service import set_setting
+from src.skills import service
+from src.skills.template import SkillDirsBody
+from src.utils.app_config import json_error
 
 router = APIRouter(prefix="/api")
 

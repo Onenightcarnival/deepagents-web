@@ -6,14 +6,15 @@
 
 工具名统一加 `服务器名__工具名` 前缀（与前端及 disabledTools 约定一致）。
 """
+
 import json
 
 import httpx
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from sqlalchemy import select
 
-from ..utils.resource_loader import resources
-from .model import McpServerRecord
+from src.mcp.model import McpServerRecord
+from src.utils.resource_loader import resources
 
 # 工具列表缓存，按配置哈希失效；仅原地更新
 _cache: dict = {"hash": None, "tools": {}}
@@ -25,10 +26,7 @@ _cache: dict = {"hash": None, "tools": {}}
 def list_mcp_servers() -> list[dict]:
     with resources.db_session() as s:
         rows = s.scalars(select(McpServerRecord).order_by(McpServerRecord.name)).all()
-    return [
-        {"name": r.name, "enabled": bool(r.enabled), **json.loads(r.config)}
-        for r in rows
-    ]
+    return [{"name": r.name, "enabled": bool(r.enabled), **json.loads(r.config)} for r in rows]
 
 
 def upsert_mcp_server(name: str, config: dict, enabled: bool = True) -> None:
@@ -50,8 +48,12 @@ def delete_mcp_server(name: str) -> None:
 
 def _httpx_client_factory(headers=None, timeout=None, auth=None) -> httpx.AsyncClient:
     return httpx.AsyncClient(
-        headers=headers, timeout=timeout, auth=auth,
-        follow_redirects=True, trust_env=False, verify=False,
+        headers=headers,
+        timeout=timeout,
+        auth=auth,
+        follow_redirects=True,
+        trust_env=False,
+        verify=False,
     )
 
 
@@ -97,17 +99,8 @@ async def get_mcp_tools(servers: list[dict]) -> tuple[list, list[str]]:
             by_server[name] = tools
         _cache.update(hash=digest, tools=by_server)
 
-    disabled = {
-        f"{s['name']}__{t}"
-        for s in servers if s.get("enabled")
-        for t in (s.get("disabledTools") or [])
-    }
-    tools = [
-        t
-        for server_tools in _cache["tools"].values()
-        for t in server_tools
-        if t.name not in disabled
-    ]
+    disabled = {f"{s['name']}__{t}" for s in servers if s.get("enabled") for t in (s.get("disabledTools") or [])}
+    tools = [t for server_tools in _cache["tools"].values() for t in server_tools if t.name not in disabled]
     return tools, errors
 
 
@@ -123,9 +116,9 @@ async def test_mcp_server(config: dict) -> dict:
                 "name": t.name,
                 "description": t.description or "",
                 # 工具入参的 JSON Schema（adapter 已解引用）
-                "schema": t.tool_call_schema if isinstance(t.tool_call_schema, dict) else (
-                    t.args_schema if isinstance(t.args_schema, dict) else None
-                ),
+                "schema": t.tool_call_schema
+                if isinstance(t.tool_call_schema, dict)
+                else (t.args_schema if isinstance(t.args_schema, dict) else None),
             }
             for t in await client.get_tools(server_name=name)
         ]
@@ -139,8 +132,7 @@ async def test_mcp_server(config: dict) -> dict:
                         "name": p.name,
                         "description": p.description or "",
                         "arguments": [
-                            {"name": a.name, "description": a.description or "",
-                             "required": bool(a.required)}
+                            {"name": a.name, "description": a.description or "", "required": bool(a.required)}
                             for a in (p.arguments or [])
                         ],
                     }
@@ -151,8 +143,12 @@ async def test_mcp_server(config: dict) -> dict:
             try:
                 res = await session.list_resources()
                 resources_list = [
-                    {"uri": str(r.uri), "name": r.name or "",
-                     "description": r.description or "", "mimeType": r.mimeType or ""}
+                    {
+                        "uri": str(r.uri),
+                        "name": r.name or "",
+                        "description": r.description or "",
+                        "mimeType": r.mimeType or "",
+                    }
                     for r in (res.resources or [])
                 ]
             except Exception:

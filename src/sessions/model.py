@@ -4,9 +4,10 @@
 id），由 langgraph 自行管理。model 列是会话级模型覆盖（JSON {provider,
 model} 或 NULL）。
 """
+
 from sqlalchemy.orm import Mapped, mapped_column
 
-from ..utils.database import Base
+from src.utils.database import Base
 
 
 class SessionRecord(Base):

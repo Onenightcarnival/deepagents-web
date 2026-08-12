@@ -1,6 +1,7 @@
 """模型连通性与 tool calling 自检，检查当前默认模型（设置 → 模型服务）。
 在项目根目录运行：uv run python -m test.check_model
 """
+
 import json
 import sys
 

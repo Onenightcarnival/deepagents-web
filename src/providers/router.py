@@ -1,11 +1,12 @@
 """模型服务商:列表、保存、连通性检测。"""
+
 from fastapi import APIRouter, Request
 from pydantic import ValidationError
 
-from ..settings.service import get_setting, set_setting
-from ..utils.app_config import json_error
-from . import service
-from .template import SaveProvidersBody, TestProviderBody
+from src.providers import service
+from src.providers.template import SaveProvidersBody, TestProviderBody
+from src.settings.service import get_setting, set_setting
+from src.utils.app_config import json_error
 
 router = APIRouter(prefix="/api")
 

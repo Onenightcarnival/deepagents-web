@@ -2,6 +2,7 @@
 
 只定义函数，由 main.py 统一挂载。
 """
+
 import contextlib
 import logging
 
@@ -10,8 +11,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from ..providers.service import resolve_model
-from .resource_loader import CONFIG, ENV, resources
+from src.providers.service import resolve_model
+from src.utils.resource_loader import CONFIG, ENV, resources
 
 logger = logging.getLogger("deepagent-web")
 
@@ -59,10 +60,7 @@ async def lifespan(_app: FastAPI):
 async def auth_middleware(request: Request, call_next):
     token = CONFIG.server.auth_token
     if token and request.url.path.startswith("/api/"):
-        ok = (
-            request.headers.get("authorization") == f"Bearer {token}"
-            or request.query_params.get("token") == token
-        )
+        ok = request.headers.get("authorization") == f"Bearer {token}" or request.query_params.get("token") == token
         if not ok:
             return json_error("unauthorized", 401)
     return await call_next(request)

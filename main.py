@@ -5,6 +5,7 @@
 启动配置见 src/config/{env}.toml（结构定义在 src/config/config_template.py）；
 模型服务商、MCP、技能目录在网页设置页配置。
 """
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles

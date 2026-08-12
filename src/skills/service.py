@@ -2,11 +2,12 @@
 deepagents' SkillsMiddleware). The app only stores a list of source
 directories; whatever they contain is loaded automatically.
 """
+
 import os
 import re
 from pathlib import Path
 
-from ..settings.service import get_setting
+from src.settings.service import get_setting
 
 DEFAULT_SKILL_DIR = str(Path.home() / ".deepagent" / "skills")
 
@@ -90,10 +91,7 @@ def scan_skills(dirs: list[str]) -> dict:
 def read_skill_file(dirs: list[str], path: str) -> str:
     """Read a SKILL.md, but only if it lives inside one of the configured dirs."""
     abs_path = Path(path).resolve()
-    allowed = any(
-        str(abs_path).startswith(expand_path(d) + "/") or str(abs_path) == expand_path(d)
-        for d in dirs
-    )
+    allowed = any(str(abs_path).startswith(expand_path(d) + "/") or str(abs_path) == expand_path(d) for d in dirs)
     if not allowed or abs_path.name != "SKILL.md":
         raise ValueError("path outside configured skill directories")
     if not abs_path.is_file():

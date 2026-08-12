@@ -1,8 +1,9 @@
 """应用设置：KV 存取（供各业务模块使用）与项目级配置写入。"""
+
 import json
 
-from ..utils.resource_loader import resources
-from .model import SettingRecord
+from src.settings.model import SettingRecord
+from src.utils.resource_loader import resources
 
 
 def get_setting(key: str, fallback=None):

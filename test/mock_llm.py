@@ -4,6 +4,7 @@ API key. Scripted behavior:
   - If a tool result is present: stream a short final text answer.
 Run: uv run python test/mock_llm.py  (listens on :8901; see --help)
 """
+
 import argparse
 import asyncio
 import json
@@ -58,25 +59,29 @@ async def completions(path: str, request: Request):
             message = {
                 "role": "assistant",
                 "content": "",
-                "tool_calls": [{
-                    "id": "call_mock_1",
-                    "type": "function",
-                    "function": {
-                        "name": "execute",
-                        "arguments": json.dumps({"command": "echo hello-from-mock-agent"}),
-                    },
-                }],
+                "tool_calls": [
+                    {
+                        "id": "call_mock_1",
+                        "type": "function",
+                        "function": {
+                            "name": "execute",
+                            "arguments": json.dumps({"command": "echo hello-from-mock-agent"}),
+                        },
+                    }
+                ],
             }
         return {
             "id": "chatcmpl-" + uuid.uuid4().hex[:12],
             "object": "chat.completion",
             "created": int(time.time()),
             "model": "mock-model",
-            "choices": [{
-                "index": 0,
-                "message": message,
-                "finish_reason": "stop" if has_tool_result else "tool_calls",
-            }],
+            "choices": [
+                {
+                    "index": 0,
+                    "message": message,
+                    "finish_reason": "stop" if has_tool_result else "tool_calls",
+                }
+            ],
             "usage": USAGE,
         }
 
@@ -85,10 +90,20 @@ async def completions(path: str, request: Request):
         if not has_tool_result:
             # stream a tool call to `execute`
             yield sse(chunk({"role": "assistant", "content": ""}))
-            yield sse(chunk({"tool_calls": [{
-                "index": 0, "id": "call_mock_1", "type": "function",
-                "function": {"name": "execute", "arguments": ""},
-            }]}))
+            yield sse(
+                chunk(
+                    {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_mock_1",
+                                "type": "function",
+                                "function": {"name": "execute", "arguments": ""},
+                            }
+                        ]
+                    }
+                )
+            )
             args = json.dumps({"command": "echo hello-from-mock-agent"})
             for piece in (args[:12], args[12:]):
                 yield sse(chunk({"tool_calls": [{"index": 0, "function": {"arguments": piece}}]}))
@@ -100,14 +115,16 @@ async def completions(path: str, request: Request):
                 await asyncio.sleep(settings["delay"])
             yield sse(chunk({}, "stop"))
         # usage chunk (as sent by OpenAI with stream_options.include_usage)
-        yield sse({
-            "id": "chatcmpl-" + uuid.uuid4().hex[:12],
-            "object": "chat.completion.chunk",
-            "created": int(time.time()),
-            "model": "mock-model",
-            "choices": [],
-            "usage": USAGE,
-        })
+        yield sse(
+            {
+                "id": "chatcmpl-" + uuid.uuid4().hex[:12],
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": "mock-model",
+                "choices": [],
+                "usage": USAGE,
+            }
+        )
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream")

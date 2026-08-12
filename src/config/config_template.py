@@ -5,6 +5,7 @@
 所有键都可省略，缺省值见各字段定义。dev.toml 随仓库提交（不含密钥），
 其他环境的 toml 已加入 .gitignore。
 """
+
 from pathlib import Path
 
 from pydantic import BaseModel
