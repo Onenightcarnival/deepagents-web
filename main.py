@@ -45,8 +45,16 @@ async def healthz():
     return json_response(status.HTTP_200_OK, ServiceCode.OK, MESSAGES[ServiceCode.OK])
 
 
-# 静态前端（放在 API 路由之后挂载，/api/* 优先匹配）
-app.mount("/", StaticFiles(directory=str(PUBLIC_DIR), html=True), name="static")
+# 静态前端（放在 API 路由之后挂载，/api/* 优先匹配）。
+# no-cache 要求浏览器每次协商缓存（ETag/304），避免 JS 模块改动后被启发式缓存拖住不更新
+class NoCacheStaticFiles(StaticFiles):
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/", NoCacheStaticFiles(directory=str(PUBLIC_DIR), html=True), name="static")
 
 
 def main() -> None:

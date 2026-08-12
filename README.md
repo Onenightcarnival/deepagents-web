@@ -2,7 +2,7 @@
 
 自托管的 Web Agent，形态类似 Codex / Claude Code：网页界面下达任务，agent 在你的机器上读写文件、执行 shell 命令、调用 MCP 工具，危险操作需要你在界面上审批。
 
-技术栈：[deepagents](https://github.com/langchain-ai/deepagents)（agent 内核）+ FastAPI + uv（Python 运行时与包管理）+ SQLite（会话与状态持久化）+ 单文件 vanilla JS 前端。
+技术栈：[deepagents](https://github.com/langchain-ai/deepagents)（agent 内核）+ FastAPI + uv（Python 运行时与包管理）+ SQLite（会话与状态持久化）+ vanilla JS 前端（原生 ES Module 分模块，无构建步骤；marked/highlight.js/DOMPurify/jsdiff 本地 vendor）。
 
 ## 特性
 
