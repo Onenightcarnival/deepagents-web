@@ -24,24 +24,10 @@ def get_providers() -> list[dict]:
     return get_setting("providers") or []
 
 
-def validate_providers(providers) -> str | None:
-    if not isinstance(providers, list):
-        return "providers must be an array"
-    seen = set()
-    for p in providers:
-        name = (p.get("name") or "").strip()
-        if not name:
-            return "每个服务商都需要名称"
-        if name in seen:
-            return f"服务商名称重复: {name}"
-        seen.add(name)
-        if p.get("enabled"):
-            if not (p.get("baseUrl") or "").strip():
-                return f"{name}: 缺少 API 地址"
-            models = p.get("models")
-            if not isinstance(models, list) or len(models) == 0:
-                return f"{name}: 至少需要一个模型"
-    return None
+def model_exists(provider: str, model: str) -> bool:
+    """启用的服务商下是否存在该模型。"""
+    p = next((x for x in get_providers() if x.get("enabled") and x["name"] == provider), None)
+    return bool(p and model in (p.get("models") or []))
 
 
 def provider_type_of(p: dict | None) -> str:

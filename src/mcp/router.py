@@ -1,12 +1,11 @@
 """MCP 服务器：配置增删、连接测试。"""
 
-import re
+from typing import Annotated
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Path
 
 from src.mcp import service
 from src.mcp.template import McpTestBody, McpUpsertBody
-from src.utils.app_config import json_error
 
 router = APIRouter(prefix="/api")
 
@@ -18,26 +17,16 @@ async def list_mcp():
 
 @router.post("/mcp/test")
 async def mcp_test(body: McpTestBody):
-    if body.transport != "http":
-        return json_error("only streamable http transport is supported")
-    if not body.url:
-        return json_error("http transport requires url")
-    return await service.test_mcp_server(body.model_dump(exclude_none=True))
+    return await service.test_mcp_server(body.model_dump(by_alias=True, exclude_none=True))
 
 
 @router.post("/mcp")
 async def upsert_mcp(body: McpUpsertBody):
-    if body.transport != "http":
-        return json_error("only streamable http transport is supported")
-    if not body.url:
-        return json_error("http transport requires url")
     service.upsert_mcp_server(body.name, body.to_config(), body.enabled)
     return {"ok": True}
 
 
 @router.delete("/mcp/{name}")
-async def delete_mcp(name: str):
-    if not re.fullmatch(r"[\w-]+", name):
-        return json_error("invalid name")
+async def delete_mcp(name: Annotated[str, Path(pattern=r"^[\w-]+$")]):
     service.delete_mcp_server(name)
     return {"ok": True}

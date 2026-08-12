@@ -1,45 +1,24 @@
 """会话模块的出入参 pydantic 模型。"""
 
-from pydantic import BaseModel, field_validator
+from typing import Annotated
+
+from pydantic import Field, StringConstraints
+
+from src.utils.template import ApiModel, NonBlankStr
 
 
-class CreateSessionBody(BaseModel):
+class CreateSessionBody(ApiModel):
     cwd: str | None = None
     title: str | None = None
 
 
-class PatchSessionBody(BaseModel):
-    title: str | None = None
-
-    @field_validator("title")
-    @classmethod
-    def _check_title(cls, v):
-        if v is not None:
-            v = v.strip()
-            if not v:
-                raise ValueError("title cannot be empty")
-            v = v[:80]
-        return v
+class PatchSessionBody(ApiModel):
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)] | None = None
 
 
-class MessageBody(BaseModel):
-    content: str
-
-    @field_validator("content")
-    @classmethod
-    def _check_content(cls, v):
-        v = (v or "").strip()
-        if not v:
-            raise ValueError("empty message")
-        return v
+class MessageBody(ApiModel):
+    content: NonBlankStr
 
 
-class ResumeBody(BaseModel):
-    decisions: list[dict]
-
-    @field_validator("decisions")
-    @classmethod
-    def _check_decisions(cls, v):
-        if not v:
-            raise ValueError("decisions required")
-        return v
+class ResumeBody(ApiModel):
+    decisions: list[dict] = Field(min_length=1)

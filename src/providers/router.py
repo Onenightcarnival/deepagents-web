@@ -5,7 +5,6 @@ from fastapi import APIRouter
 from src.providers import service
 from src.providers.template import SaveProvidersBody, TestProviderBody
 from src.settings.service import get_setting, set_setting
-from src.utils.app_config import json_error
 
 router = APIRouter(prefix="/api")
 
@@ -17,13 +16,10 @@ async def list_providers():
 
 @router.post("/providers")
 async def save_providers(body: SaveProvidersBody):
-    err = service.validate_providers(body.providers)
-    if err:
-        return json_error(err)
-    set_setting("providers", body.providers)
+    set_setting("providers", [p.model_dump(by_alias=True, exclude_none=True) for p in body.providers])
     return {"ok": True}
 
 
 @router.post("/providers/test")
 async def providers_test(body: TestProviderBody):
-    return await service.test_provider(body.baseUrl, body.apiKey, body.model)
+    return await service.test_provider(body.base_url, body.api_key, body.model)

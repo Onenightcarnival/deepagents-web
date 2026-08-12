@@ -31,7 +31,7 @@ def validation_error_message(e) -> str:
     """取校验错误的第一条，转成对前端友好的单行文案。
 
     兼容 pydantic ValidationError 与 FastAPI RequestValidationError
-    （后者的 loc 以 "body" 开头，展示时去掉）。"""
+    （后者的 loc 以 body/path/query 等来源开头，展示时去掉）。"""
     first = e.errors()[0]
     if first.get("type") == "json_invalid":
         return "invalid JSON body"
@@ -39,15 +39,15 @@ def validation_error_message(e) -> str:
     if first.get("type") == "value_error":
         return msg  # 自定义校验消息，本身已可读
     parts = [str(p) for p in first.get("loc") or ()]
-    if parts and parts[0] == "body":
+    if parts and parts[0] in ("body", "path", "query", "header"):
         parts = parts[1:]
     loc = ".".join(parts)
     return f"{loc}: {msg}" if loc else msg
 
 
 async def on_validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
-    """请求体校验失败的全局出口：router 内不再逐个 try/except。"""
-    return json_error(validation_error_message(exc))
+    """请求校验失败的全局出口：router 内不再逐个 try/except。"""
+    return json_error(validation_error_message(exc), 422)
 
 
 @contextlib.asynccontextmanager

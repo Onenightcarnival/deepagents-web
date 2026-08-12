@@ -1,42 +1,35 @@
 """MCP 模块的出入参 pydantic 模型。"""
 
-import re
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import ConfigDict, Field
+
+from src.utils.template import ApiModel, NonBlankStr
 
 
-class McpTestBody(BaseModel):
+class McpServerBase(ApiModel):
+    """MCP 服务器配置的公共约束：目前只支持 streamable http，且必须带 url。"""
+
     model_config = ConfigDict(extra="allow")
 
-    transport: str
-    url: str | None = None
-    name: str | None = None
+    transport: Literal["http"]
+    url: NonBlankStr
     headers: dict[str, str] | None = None
 
 
-class McpUpsertBody(BaseModel):
+class McpTestBody(McpServerBase):
+    name: str | None = None
+
+
+class McpUpsertBody(McpServerBase):
     """保存 MCP 服务器。除 name/enabled 外的字段整体作为 config 存库。"""
 
-    model_config = ConfigDict(extra="allow")
-
-    name: str
+    name: str = Field(pattern=r"^[\w-]+$")
     enabled: bool = True
-    transport: str
-    url: str | None = None
-    headers: dict[str, str] | None = None
-    disabledTools: list | None = None
-
-    @field_validator("name")
-    @classmethod
-    def _check_name(cls, v):
-        if not re.fullmatch(r"[\w-]+", v or ""):
-            raise ValueError("invalid name")
-        return v
+    disabled_tools: list[str] | None = None
 
     def to_config(self) -> dict:
-        config = self.model_dump(exclude={"name", "enabled"}, exclude_none=True)
-        tools = [t for t in (self.disabledTools or []) if isinstance(t, str)]
-        config.pop("disabledTools", None)
-        if tools:
-            config["disabledTools"] = tools
+        config = self.model_dump(by_alias=True, exclude={"name", "enabled"}, exclude_none=True)
+        if not self.disabled_tools:
+            config.pop("disabledTools", None)
         return config
