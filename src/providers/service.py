@@ -1,7 +1,7 @@
 """模型服务商（Cherry-Studio 式配置）。
 
-服务商列表存在 settings 表的 providers 键（JSON 数组）：
-  [{ name, enabled, baseUrl, apiKey, models: [str], defaultModel }]
+服务商存 providers 表（name 主键），对外形状：
+  { name, enabled, baseUrl, apiKey, models: [str], defaultModel, type? }
 
 模型选择与生成参数都跟随「项目」（项目=工作目录；自动创建的 workspace
 里的会话共享虚拟项目 __standalone__），存 settings.projectConfig：
@@ -12,16 +12,75 @@
   projectConfig[key].model -> settings.defaultModel -> 第一个启用服务商的默认模型
 """
 
+import json
 import re
 import time
 
 import httpx
+from sqlalchemy import select
 
+from src.providers.model import ProviderRecord
+from src.providers.template import ProviderBody
 from src.settings.service import get_setting
+from src.utils.resource_loader import resources
+
+
+def _public(r: ProviderRecord) -> dict:
+    p = {
+        "name": r.name,
+        "enabled": bool(r.enabled),
+        "baseUrl": r.base_url,
+        "apiKey": r.api_key or "",
+        "models": json.loads(r.models),
+        "defaultModel": r.default_model,
+    }
+    if r.type:
+        p["type"] = r.type
+    return p
+
+
+def _apply(row: ProviderRecord, body: ProviderBody) -> None:
+    row.name = body.name
+    row.enabled = 1 if body.enabled else 0
+    row.base_url = body.base_url
+    row.api_key = body.api_key
+    row.models = json.dumps(body.models)
+    row.default_model = body.default_model
+    row.type = body.type
 
 
 def get_providers() -> list[dict]:
-    return get_setting("providers") or []
+    with resources.db_session() as s:
+        return [_public(r) for r in s.scalars(select(ProviderRecord)).all()]
+
+
+def create_provider(body: ProviderBody) -> None:
+    """新增服务商。重名由主键约束拦截（IntegrityError 由调用方处理）。"""
+    with resources.db_session() as s:
+        row = ProviderRecord(name=body.name)
+        _apply(row, body)
+        s.add(row)
+        s.commit()
+
+
+def update_provider(name: str, body: ProviderBody) -> bool:
+    """更新服务商（body.name 与 name 不同即重命名）。不存在返回 False；
+    重命名撞到已有名称由主键约束拦截。"""
+    with resources.db_session() as s:
+        row = s.get(ProviderRecord, name)
+        if row is None:
+            return False
+        _apply(row, body)
+        s.commit()
+    return True
+
+
+def delete_provider(name: str) -> None:
+    with resources.db_session() as s:
+        row = s.get(ProviderRecord, name)
+        if row:
+            s.delete(row)
+            s.commit()
 
 
 def model_exists(provider: str, model: str) -> bool:

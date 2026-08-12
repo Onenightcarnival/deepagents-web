@@ -8,18 +8,20 @@
 """
 
 import argparse
+import json
 import sys
 import tomllib
 
-from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, inspect, select, text
+from sqlalchemy.orm import Session, sessionmaker
 
 from src.config.config_template import ROOT_DIR, AppConfig
 
 # ORM 模型需在 create_all 前注册到 Base.metadata
 from src.mcp.model import McpServerRecord  # noqa: F401
+from src.providers.model import ProviderRecord
 from src.sessions.model import SessionRecord  # noqa: F401
-from src.settings.model import SettingRecord  # noqa: F401
+from src.settings.model import SettingRecord
 from src.utils.database import Base
 
 PUBLIC_DIR = ROOT_DIR / "public"
@@ -63,7 +65,32 @@ def _init_engine(config: AppConfig):
         cols = [c["name"] for c in inspect(conn).get_columns("sessions")]
         if "model" not in cols:
             conn.execute(text("ALTER TABLE sessions ADD COLUMN model TEXT"))
+    _migrate_providers_from_settings(engine)
     return engine
+
+
+def _migrate_providers_from_settings(engine) -> None:
+    """迁移：服务商列表从 settings 表的 providers 键（JSON 数组）迁到
+    providers 表，迁移后删除该键。"""
+    with Session(engine) as s:
+        kv = s.get(SettingRecord, "providers")
+        if kv is None:
+            return
+        if s.scalars(select(ProviderRecord).limit(1)).first() is None:
+            for p in json.loads(kv.value) or []:
+                s.add(
+                    ProviderRecord(
+                        name=p.get("name") or "",
+                        enabled=1 if p.get("enabled") else 0,
+                        base_url=p.get("baseUrl") or "",
+                        api_key=p.get("apiKey"),
+                        models=json.dumps(p.get("models") or []),
+                        default_model=p.get("defaultModel"),
+                        type=p.get("type"),
+                    )
+                )
+        s.delete(kv)
+        s.commit()
 
 
 class Resources:

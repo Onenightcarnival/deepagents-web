@@ -1377,6 +1377,7 @@ function closeSettings() {
 async function loadProvidersPane() {
   const { providers } = await api("/api/providers");
   state.providers = structuredClone(providers);
+  state.providers.forEach((p) => { p._orig = p.name; }); // 服务端主键，重命名时定位记录
   state.providersDirty = false;
   state.selectedProvider = Math.min(state.selectedProvider, Math.max(0, state.providers.length - 1));
   renderProviders();
@@ -1395,10 +1396,22 @@ function renderProviders() {
       <span class="p-name">${esc(p.name)}</span>
       <span class="toggle ${p.enabled ? "on" : ""}"></span>`;
     item.onclick = () => { state.selectedProvider = i; renderProviders(); };
-    item.querySelector(".toggle").onclick = (e) => {
+    item.querySelector(".toggle").onclick = async (e) => {
       e.stopPropagation();
       p.enabled = !p.enabled;
-      state.providersDirty = true;
+      if (p._orig) {
+        // 已保存的服务商：开关即保存
+        try {
+          await saveProvider(p);
+          state.config = await api("/api/config");
+          renderModelChip();
+        } catch (err) {
+          p.enabled = !p.enabled;
+          alert("保存失败: " + err.message);
+        }
+      } else {
+        state.providersDirty = true;
+      }
       renderProviders();
     };
     list.appendChild(item);
@@ -1500,23 +1513,35 @@ function renderProviderDetail() {
   box.querySelector("#pv-new-model").onkeydown = (e) => {
     if (e.key === "Enter") box.querySelector("#pv-add-model").click();
   };
-  box.querySelector("#pv-del").onclick = () => {
+  box.querySelector("#pv-del").onclick = async () => {
     if (!confirm(`删除服务商「${p.name}」？`)) return;
+    if (p._orig) {
+      try { await api(`/api/providers/${encodeURIComponent(p._orig)}`, { method: "DELETE" }); }
+      catch (e) { alert("删除失败: " + e.message); return; }
+    }
     state.providers.splice(state.selectedProvider, 1);
     state.selectedProvider = 0;
-    state.providersDirty = true;
-    renderProviders();
-  };
-  box.querySelector("#pv-save").onclick = saveProviders;
-}
-async function saveProviders() {
-  try {
-    await api("/api/providers", { method: "POST", body: { providers: state.providers } });
     state.providersDirty = false;
     state.config = await api("/api/config");
     renderModelChip();
-    renderProviderDetail();
-  } catch (e) { alert("保存失败: " + e.message); }
+    renderProviders();
+  };
+  box.querySelector("#pv-save").onclick = async () => {
+    try {
+      await saveProvider(p);
+      state.providersDirty = false;
+      state.config = await api("/api/config");
+      renderModelChip();
+      renderProviders();
+    } catch (e) { alert("保存失败: " + e.message); }
+  };
+}
+// 单条保存：新建 POST（重名 409），已有 PUT（按服务端主键 _orig 定位，改名即重命名）
+async function saveProvider(p) {
+  const { _orig, ...body } = p;
+  if (_orig) await api(`/api/providers/${encodeURIComponent(_orig)}`, { method: "PUT", body });
+  else await api("/api/providers", { method: "POST", body });
+  p._orig = p.name;
 }
 
 // ------------------------------------------------------------ settings: MCP
