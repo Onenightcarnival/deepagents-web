@@ -39,8 +39,18 @@ mkdirSync(WORKSPACE_ROOT, { recursive: true });
 const db = createAppDb(join(DATA_DIR, "app.db"));
 const checkpointer = createCheckpointer(join(DATA_DIR, "checkpoints.db"));
 
-/** sessionId -> AbortController for the currently active run */
-const activeRuns = new Map();
+/**
+ * sessionId -> most recent run record. Runs execute detached from any HTTP
+ * connection: closing the page only drops the subscriber, never the run.
+ * Finished runs are kept (until replaced) so a late reattach can still see
+ * how the run ended. Lost on server restart — runs do not survive it.
+ */
+const runs = new Map();
+
+function activeRun(sessionId) {
+  const run = runs.get(sessionId);
+  return run && !run.done ? run : null;
+}
 
 // ---------------------------------------------------------------- helpers
 
@@ -94,98 +104,180 @@ function threadConfig(sessionId) {
 }
 
 /**
- * Stream one agent run (new message or resume) as SSE.
+ * Start one agent run (new message or resume) detached from any HTTP
+ * connection. Events are buffered on the run record for replay, and fanned
+ * out live to subscribers (see the /stream endpoint). Resolves after the
+ * agent is built — build failures surface as a normal HTTP error — while
+ * the streaming loop continues in the background.
+ *
+ * `userText` is the triggering user message (null for resume runs); it goes
+ * into the buffer so a reattaching client can reconstruct the full run.
  */
-function streamRun(session, input) {
-  const encoder = new TextEncoder();
+async function startRun(session, input, userText = null) {
   const abort = new AbortController();
-  activeRuns.set(session.id, abort);
+  const run = {
+    events: [],          // buffered for (re)attach replay
+    subscribers: new Set(),
+    abort,
+    done: false,
+    status: "running",   // running | done | error | aborted
+    error: null,
+    cutoff: 0,           // serialized-history length when the run started
+  };
 
-  const stream = new ReadableStream({
-    async start(controller) {
-      const send = (obj) => {
-        try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
-        } catch {}
-      };
-      try {
-        const { agent, mcpErrors } = await getSessionAgent(session);
-        for (const err of mcpErrors) send({ type: "warning", message: `MCP: ${err}` });
+  const push = (obj) => {
+    const last = run.events[run.events.length - 1];
+    if (last && last.type === obj.type &&
+        (obj.type === "ai_delta" || obj.type === "reasoning_delta")) {
+      last.text += obj.text; // coalesce deltas so the buffer stays message-sized
+    } else {
+      run.events.push(obj);
+    }
+    for (const sub of [...run.subscribers]) sub(obj);
+  };
 
-        const runStream = await agent.stream(input, {
-          ...threadConfig(session.id),
-          streamMode: ["messages", "updates"],
-          signal: abort.signal,
-        });
+  // Reserve the busy slot before the (slow) agent build so concurrent
+  // POSTs can't start a second run for the same session.
+  const prev = runs.get(session.id);
+  runs.set(session.id, run);
+  let agent;
+  try {
+    const built = await getSessionAgent(session);
+    agent = built.agent;
+    const state = await agent.getState(threadConfig(session.id));
+    run.cutoff = serializeHistory(state?.values?.messages).length;
+    if (userText != null) push({ type: "user", text: userText });
+    for (const err of built.mcpErrors) push({ type: "warning", message: `MCP: ${err}` });
+  } catch (e) {
+    if (prev) runs.set(session.id, prev);
+    else runs.delete(session.id);
+    throw e;
+  }
 
-        for await (const [mode, data] of runStream) {
-          if (mode === "messages") {
-            const [msg] = data;
-            const cls = msg?.constructor?.name ?? "";
-            if (cls === "AIMessageChunk" || cls === "ChatMessageChunk") {
-              const text = contentToText(msg.content);
-              if (text) send({ type: "ai_delta", text });
-              const reasoning = msg.additional_kwargs?.reasoning_content;
-              if (reasoning) send({ type: "reasoning_delta", text: reasoning });
-            } else if (cls === "ToolMessage") {
-              send({
-                type: "tool_result",
-                id: msg.tool_call_id,
-                name: msg.name,
-                text: contentToText(msg.content).slice(0, 20000),
-                status: msg.status ?? "success",
-              });
+  (async () => {
+    try {
+      const runStream = await agent.stream(input, {
+        ...threadConfig(session.id),
+        streamMode: ["messages", "updates"],
+        signal: abort.signal,
+      });
+
+      for await (const [mode, data] of runStream) {
+        if (mode === "messages") {
+          const [msg] = data;
+          const cls = msg?.constructor?.name ?? "";
+          if (cls === "AIMessageChunk" || cls === "ChatMessageChunk") {
+            const text = contentToText(msg.content);
+            if (text) push({ type: "ai_delta", text });
+            const reasoning = msg.additional_kwargs?.reasoning_content;
+            if (reasoning) push({ type: "reasoning_delta", text: reasoning });
+          } else if (cls === "ToolMessage") {
+            push({
+              type: "tool_result",
+              id: msg.tool_call_id,
+              name: msg.name,
+              text: contentToText(msg.content).slice(0, 20000),
+              status: msg.status ?? "success",
+            });
+          }
+        } else if (mode === "updates") {
+          if (data.__interrupt__) {
+            push({
+              type: "interrupt",
+              interrupts: serializeInterrupts([
+                { interrupts: data.__interrupt__ },
+              ]),
+            });
+            continue;
+          }
+          for (const update of Object.values(data)) {
+            if (!update || typeof update !== "object") continue;
+            // surface completed AI messages (for tool_calls) and todos
+            if (Array.isArray(update.todos)) {
+              push({ type: "todos", todos: update.todos });
             }
-          } else if (mode === "updates") {
-            if (data.__interrupt__) {
-              send({
-                type: "interrupt",
-                interrupts: serializeInterrupts([
-                  { interrupts: data.__interrupt__ },
-                ]),
-              });
-              continue;
-            }
-            for (const update of Object.values(data)) {
-              if (!update || typeof update !== "object") continue;
-              // surface completed AI messages (for tool_calls) and todos
-              if (Array.isArray(update.todos)) {
-                send({ type: "todos", todos: update.todos });
-              }
-              if (Array.isArray(update.messages)) {
-                for (const m of update.messages) {
-                  const t = m?.type ?? m?._getType?.();
-                  if (t === "ai" && m.tool_calls?.length) {
-                    send({
-                      type: "tool_calls",
-                      calls: m.tool_calls.map((c) => ({
-                        id: c.id,
-                        name: c.name,
-                        args: c.args,
-                      })),
-                    });
-                  }
+            if (Array.isArray(update.messages)) {
+              for (const m of update.messages) {
+                const t = m?.type ?? m?._getType?.();
+                if (t === "ai" && m.tool_calls?.length) {
+                  push({
+                    type: "tool_calls",
+                    calls: m.tool_calls.map((c) => ({
+                      id: c.id,
+                      name: c.name,
+                      args: c.args,
+                    })),
+                  });
                 }
               }
             }
           }
         }
-        db.touchSession(session.id);
-        send({ type: "done" });
-      } catch (e) {
-        const message = String(e?.message ?? e);
-        if (!abort.signal.aborted) send({ type: "error", message });
-        else send({ type: "done", aborted: true });
-      } finally {
-        activeRuns.delete(session.id);
-        try {
-          controller.close();
-        } catch {}
       }
+      db.touchSession(session.id);
+      run.status = "done";
+      push({ type: "done" });
+    } catch (e) {
+      const message = String(e?.message ?? e);
+      if (abort.signal.aborted) {
+        run.status = "aborted";
+        push({ type: "done", aborted: true });
+      } else {
+        run.status = "error";
+        run.error = message;
+        push({ type: "error", message });
+        push({ type: "done" });
+      }
+    } finally {
+      run.done = true;
+      run.subscribers.clear();
+    }
+  })();
+
+  return run;
+}
+
+/**
+ * SSE response attached to a session's run: replays the buffer, then relays
+ * live events until the run finishes. Client disconnect only unsubscribes —
+ * it never aborts the run (that is what POST /stop is for).
+ */
+function streamAttachResponse(run) {
+  const encoder = new TextEncoder();
+  let subscriber = null;
+
+  const stream = new ReadableStream({
+    start(controller) {
+      const send = (obj) => {
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+        } catch {
+          if (subscriber) run?.subscribers.delete(subscriber);
+        }
+      };
+      const close = () => {
+        try { controller.close(); } catch {}
+      };
+
+      if (!run) {
+        // no run on record — client should rely on /history
+        send({ type: "done", idle: true });
+        close();
+        return;
+      }
+      for (const ev of run.events) send(ev);
+      if (run.done) { close(); return; }
+      subscriber = (ev) => {
+        send(ev);
+        if (ev.type === "done") {
+          run.subscribers.delete(subscriber);
+          close();
+        }
+      };
+      run.subscribers.add(subscriber);
     },
     cancel() {
-      abort.abort();
-      activeRuns.delete(session.id);
+      if (subscriber) run?.subscribers.delete(subscriber);
     },
   });
 
@@ -371,7 +463,7 @@ async function handleApi(req, url) {
     return json({
       sessions: db.listSessions().map((s) => ({
         ...publicSession(s),
-        busy: activeRuns.has(s.id),
+        busy: !!activeRun(s.id),
       })),
     });
   }
@@ -395,7 +487,7 @@ async function handleApi(req, url) {
   }
 
   const sm = pathname.match(
-    /^\/api\/sessions\/([0-9a-f-]{36})(\/(history|messages|resume|stop))?$/
+    /^\/api\/sessions\/([0-9a-f-]{36})(\/(history|messages|resume|stop|stream))?$/
   );
   if (sm) {
     const session = db.getSession(sm[1]);
@@ -403,7 +495,8 @@ async function handleApi(req, url) {
     const sub = sm[3];
 
     if (!sub && method === "DELETE") {
-      activeRuns.get(session.id)?.abort();
+      activeRun(session.id)?.abort.abort();
+      runs.delete(session.id);
       db.deleteSession(session.id);
       await checkpointer.deleteThread?.(session.id).catch?.(() => {});
       return json({ ok: true });
@@ -423,9 +516,15 @@ async function handleApi(req, url) {
     if (sub === "history" && method === "GET") {
       const { agent } = await getSessionAgent(session);
       const state = await agent.getState(threadConfig(session.id));
+      const run = runs.get(session.id);
+      const busy = !!run && !run.done;
       return json({
         session: publicSession(session),
-        busy: activeRuns.has(session.id),
+        busy,
+        // where the running turn starts in `messages` — the client renders
+        // history up to here and reconstructs the rest from /stream replay
+        runCutoff: busy ? run.cutoff : null,
+        lastRun: run && run.done ? { status: run.status, error: run.error } : null,
         messages: serializeHistory(state?.values?.messages),
         todos: state?.values?.todos ?? [],
         interrupts: serializeInterrupts(state?.tasks),
@@ -433,7 +532,7 @@ async function handleApi(req, url) {
     }
 
     if (sub === "messages" && method === "POST") {
-      if (activeRuns.has(session.id)) return json({ error: "session busy" }, 409);
+      if (activeRun(session.id)) return json({ error: "session busy" }, 409);
       const body = await req.json();
       const content = String(body.content ?? "").trim();
       if (!content) return json({ error: "empty message" }, 400);
@@ -441,20 +540,26 @@ async function handleApi(req, url) {
         db.touchSession(session.id, content.slice(0, 40));
         session.title = content.slice(0, 40);
       }
-      return streamRun(session, { messages: [{ role: "user", content }] });
+      await startRun(session, { messages: [{ role: "user", content }] }, content);
+      return json({ ok: true });
     }
 
     if (sub === "resume" && method === "POST") {
-      if (activeRuns.has(session.id)) return json({ error: "session busy" }, 409);
+      if (activeRun(session.id)) return json({ error: "session busy" }, 409);
       const body = await req.json();
       if (!Array.isArray(body.decisions) || body.decisions.length === 0) {
         return json({ error: "decisions required" }, 400);
       }
-      return streamRun(session, new Command({ resume: { decisions: body.decisions } }));
+      await startRun(session, new Command({ resume: { decisions: body.decisions } }));
+      return json({ ok: true });
+    }
+
+    if (sub === "stream" && method === "GET") {
+      return streamAttachResponse(runs.get(session.id));
     }
 
     if (sub === "stop" && method === "POST") {
-      activeRuns.get(session.id)?.abort();
+      activeRun(session.id)?.abort.abort();
       return json({ ok: true });
     }
   }

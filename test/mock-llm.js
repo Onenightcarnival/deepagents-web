@@ -5,7 +5,10 @@
  *   - If a tool result is present: stream a short final text answer.
  * Run: bun test/mock-llm.js  (listens on :8901)
  */
-const PORT = 8901;
+const PORT = Number(process.env.MOCK_PORT ?? 8901);
+// per-word delay when streaming the final answer; raise it (e.g. 800) to
+// keep a run in-flight long enough to exercise detach/reattach flows
+const DELAY = Number(process.env.MOCK_DELAY_MS ?? 30);
 
 function sse(obj) {
   return `data: ${JSON.stringify(obj)}\n\n`;
@@ -108,7 +111,7 @@ Bun.serve({
           push(sse(chunk({ role: "assistant", content: "" })));
           for (const word of ["命令", "已执行", "，输出", "见上方", "工具结果。"]) {
             push(sse(chunk({ content: word })));
-            await new Promise((r) => setTimeout(r, 30));
+            await new Promise((r) => setTimeout(r, DELAY));
           }
           push(sse(chunk({}, "stop")));
         }

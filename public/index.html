@@ -626,6 +626,8 @@ const state = {
   current: null,
   streaming: false,
   liveAssistant: null,
+  streamAbort: null,     // AbortController of the current /stream subscription
+  skipUserEvent: false,  // sender tab already rendered its own user message
   config: null,        // /api/config
   providers: [],       // working copy in settings UI
   providersDirty: false,
@@ -874,7 +876,9 @@ function showApproval(interrupts) {
   };
 }
 
-// ------------------------------------------------------------ streaming (unchanged)
+// ------------------------------------------------------------ streaming
+// 运行在服务端后台执行；这里只是订阅 GET /stream 的事件流。关掉页面不会
+// 中止运行，重新打开后 selectSession 会重挂到进行中的运行上。
 function setStreaming(on, statusText) {
   state.streaming = on;
   $("btn-send").style.display = on ? "none" : "";
@@ -902,6 +906,13 @@ async function consumeSSE(response) {
 }
 function handleEvent(ev) {
   switch (ev.type) {
+    case "user":
+      // 发送方页签已本地渲染过这条消息，跳过回放里的第一条
+      if (state.skipUserEvent) { state.skipUserEvent = false; break; }
+      chatEl.querySelector("#empty-hint")?.remove();
+      addUserMsg(ev.text);
+      state.liveAssistant = null;
+      break;
     case "ai_delta": appendAiText(ev.text); break;
     case "reasoning_delta": appendReasoning(ev.text); break;
     case "tool_calls":
@@ -918,26 +929,44 @@ function handleEvent(ev) {
     case "done": finalizeThink(state.liveAssistant); break;
   }
 }
-async function runStream(url, body, statusText) {
+function detachStream() {
+  state.streamAbort?.abort();
+  state.streamAbort = null;
+}
+async function attachStream({ skipUser = false, statusText } = {}) {
+  detachStream();
+  const ctrl = new AbortController();
+  state.streamAbort = ctrl;
+  const sess = state.current;
   setStreaming(true, statusText);
   state.liveAssistant = null;
+  state.skipUserEvent = skipUser;
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || `HTTP ${res.status}`);
-    }
+    const res = await fetch(`/api/sessions/${sess.id}/stream`, { signal: ctrl.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     await consumeSSE(res);
+    if (state.streamAbort === ctrl) {
+      state.streamAbort = null;
+      setStreaming(false);
+      loadSessions();
+    }
+  } catch (e) {
+    if (ctrl.signal.aborted) return; // 主动切换/替换了订阅，忽略
+    // 连接中途断开（休眠、网络抖动）——重新从历史同步并重挂
+    if (state.current?.id === sess.id) selectSession(state.current);
+  }
+}
+async function startRunRequest(url, body, opts) {
+  setStreaming(true, opts?.statusText);
+  try {
+    await api(url, { method: "POST", body });
   } catch (e) {
     addWarnBanner("请求失败: " + e.message);
-  } finally {
     setStreaming(false);
     loadSessions();
+    return;
   }
+  attachStream(opts);
 }
 function sendMessage() {
   const text = $("input").value.trim();
@@ -947,10 +976,10 @@ function sendMessage() {
   autoGrow();
   $("chat-inner").querySelector("#empty-hint")?.remove();
   addUserMsg(text);
-  runStream(`/api/sessions/${state.current.id}/messages`, { content: text });
+  startRunRequest(`/api/sessions/${state.current.id}/messages`, { content: text }, { skipUser: true });
 }
 function resumeRun(decisions) {
-  runStream(`/api/sessions/${state.current.id}/resume`, { decisions }, "执行已审批的操作…");
+  startRunRequest(`/api/sessions/${state.current.id}/resume`, { decisions }, { statusText: "执行已审批的操作…" });
 }
 
 // ------------------------------------------------------------ sidebar: grouped sessions
@@ -1077,6 +1106,8 @@ function setTopbar() {
   renderModelChip();
 }
 async function selectSession(s) {
+  detachStream();
+  setStreaming(false);
   state.current = s;
   setTopbar();
   chatEl.innerHTML = "";
@@ -1084,10 +1115,13 @@ async function selectSession(s) {
   renderSessions();
   try {
     const h = await api(`/api/sessions/${s.id}/history`);
+    if (state.current?.id !== s.id) return; // 加载期间切走了
     state.current = { ...s, ...h.session };
     setTopbar();
     state.liveAssistant = null;
-    for (const m of h.messages) {
+    // 运行中：历史只渲染到本轮起点，本轮内容由 /stream 回放重建，避免重复
+    const msgs = h.busy && h.runCutoff != null ? h.messages.slice(0, h.runCutoff) : h.messages;
+    for (const m of msgs) {
       if (m.role === "user") addUserMsg(m.text);
       else if (m.role === "assistant") {
         const turn = newAssistantTurn();
@@ -1101,8 +1135,12 @@ async function selectSession(s) {
     renderTodos(h.todos);
     if (h.interrupts?.length) showApproval(h.interrupts);
     state.liveAssistant = null;
-    if (h.messages.length === 0) showEmptyHint();
+    if (!h.busy && h.lastRun?.status === "error" && h.lastRun.error) {
+      addWarnBanner("上次运行出错: " + h.lastRun.error);
+    }
+    if (msgs.length === 0 && !h.busy) showEmptyHint();
     scrollBottom();
+    if (h.busy) attachStream();
   } catch (e) {
     addWarnBanner("加载历史失败: " + e.message);
   }
