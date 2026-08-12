@@ -173,15 +173,18 @@ async def post_message(session_id: str, body: MessageBody, request: Request, db:
     session = _get_session(db, session_id)
     if not session:
         return json_response(status.HTTP_404_NOT_FOUND, SessionCode.NOT_FOUND, MESSAGES[SessionCode.NOT_FOUND])
-    if active_run(session["id"]):
-        return json_response(status.HTTP_409_CONFLICT, SessionCode.BUSY, MESSAGES[SessionCode.BUSY])
     content = body.content
+    run = active_run(session["id"])
+    if run:
+        # 运行中追加：入队，SteeringMiddleware 在下一次模型调用前注入
+        service.enqueue_message(run, content)
+        return json_response(status.HTTP_200_OK, SessionCode.OK, MESSAGES[SessionCode.OK], data={"queued": True})
     if session["title"] == "New session":
         service.touch_session(db, session["id"], content[:40])
         session["title"] = content[:40]
     checkpointer = request.app.state.checkpointer
     await service.start_run(db, checkpointer, session, {"messages": [{"role": "user", "content": content}]}, content)
-    return json_response(status.HTTP_200_OK, SessionCode.OK, MESSAGES[SessionCode.OK])
+    return json_response(status.HTTP_200_OK, SessionCode.OK, MESSAGES[SessionCode.OK], data={"queued": False})
 
 
 @router.post("/{session_id}/resume")

@@ -17,8 +17,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 # per-word delay (seconds) when streaming the final answer; raise it (e.g.
 # --delay-ms 800) to keep a run in-flight long enough to exercise
-# detach/reattach flows
-settings = {"delay": 0.03}
+# detach/reattach flows. --command 可替换脚本里的 shell 命令（如加 sleep
+# 制造慢工具窗口，验证运行中消息注入）
+settings = {"delay": 0.03, "command": "echo hello-from-mock-agent"}
 
 app = FastAPI()
 
@@ -65,7 +66,7 @@ async def completions(path: str, request: Request):
                         "type": "function",
                         "function": {
                             "name": "execute",
-                            "arguments": json.dumps({"command": "echo hello-from-mock-agent"}),
+                            "arguments": json.dumps({"command": settings["command"]}),
                         },
                     }
                 ],
@@ -104,7 +105,7 @@ async def completions(path: str, request: Request):
                     }
                 )
             )
-            args = json.dumps({"command": "echo hello-from-mock-agent"})
+            args = json.dumps({"command": settings["command"]})
             for piece in (args[:12], args[12:]):
                 yield sse(chunk({"tool_calls": [{"index": 0, "function": {"arguments": piece}}]}))
             yield sse(chunk({}, "tool_calls"))
@@ -134,8 +135,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="OpenAI-compatible mock LLM")
     parser.add_argument("--port", type=int, default=8901)
     parser.add_argument("--delay-ms", type=float, default=30)
+    parser.add_argument("--command", default=settings["command"])
     args = parser.parse_args()
     settings["delay"] = args.delay_ms / 1000
+    settings["command"] = args.command
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
 
 

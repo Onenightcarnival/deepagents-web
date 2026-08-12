@@ -25,6 +25,7 @@ def serialize_message(msg) -> dict | None:
     if t == "human":
         return {"role": "user", "text": content_to_text(msg.content)}
     if t == "ai":
+        usage = getattr(msg, "usage_metadata", None)
         return {
             "role": "assistant",
             "text": content_to_text(msg.content),
@@ -33,6 +34,13 @@ def serialize_message(msg) -> dict | None:
                 {"id": c.get("id"), "name": c.get("name"), "args": c.get("args")}
                 for c in (getattr(msg, "tool_calls", None) or [])
             ],
+            "usage": {
+                "inputTokens": usage.get("input_tokens", 0),
+                "outputTokens": usage.get("output_tokens", 0),
+                "totalTokens": usage.get("total_tokens", 0),
+            }
+            if usage
+            else None,
         }
     if t == "tool":
         return {

@@ -1,6 +1,6 @@
 // 顶栏：会话标题、cwd chip、模型 chip（含项目级模型/参数/审批白名单弹层）、
 // 技能 chip、导出按钮
-import { $, esc, baseName, shortPath } from "./utils.js";
+import { $, esc, baseName, shortPath, fmtTokens } from "./utils.js";
 import { api, CTX } from "./api.js";
 import { state } from "./state.js";
 
@@ -33,6 +33,16 @@ export function setTopbar() {
   $("cwd-chip").style.display = s ? "" : "none";
   $("btn-export").style.display = s ? "" : "none";
   renderModelChip();
+  renderUsage();
+}
+
+// token 用量 chip：模型每次调用结束（usage 事件）或加载历史后刷新
+export function renderUsage() {
+  const chip = $("usage-chip");
+  const u = state.usage;
+  if (!state.current || !u.total) { chip.style.display = "none"; return; }
+  chip.style.display = "";
+  chip.textContent = `◔ 上下文 ${fmtTokens(u.context)} · 累计 ${fmtTokens(u.total)}`;
 }
 
 export function renderModelChip() {

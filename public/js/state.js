@@ -8,6 +8,7 @@ export const state = {
   skipUserEvent: false,  // 发送方页签已本地渲染过自己的用户消息
   config: null,          // GET /settings
   skills: { dirs: [], skills: [] },
+  usage: { context: 0, total: 0 },  // 当前会话 token 用量（context=最近一次调用，total=累计）
   collapsed: new Set(JSON.parse(localStorage.getItem("collapsedGroups") || "[]")),
 };
 

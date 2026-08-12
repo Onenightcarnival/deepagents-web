@@ -16,3 +16,9 @@ export function relTime(ts) {
 export function baseName(p) { return p.replace(/\/+$/, "").split("/").pop() || p; }
 
 export function shortPath(p) { return p.replace(/^\/(Users|home)\/[^/]+/, "~"); }
+
+export function fmtTokens(n) {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+  if (n >= 1000) return (n / 1000).toFixed(1) + "k";
+  return String(n);
+}

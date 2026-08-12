@@ -8,7 +8,8 @@ import anyio
 import httpx
 from deepagents import create_deep_agent
 from deepagents.backends import LocalShellBackend
-from langchain.agents.middleware import TodoListMiddleware
+from langchain.agents.middleware import AgentMiddleware, TodoListMiddleware
+from langchain_core.messages import HumanMessage
 from langchain_deepseek import ChatDeepSeek
 from langchain_openai import ChatOpenAI
 
@@ -28,6 +29,44 @@ Rules:
 - Reply in the same language the user writes in.
 - Keep final answers concise; the user can see tool outputs in the UI."""
 
+# 项目记忆文件：按优先级取第一个存在的注入 system prompt（只取一个，
+# CLAUDE.md 通常引用 AGENTS.md，两个都注入会重复）
+_MEMORY_FILES = ("AGENTS.md", "CLAUDE.md")
+_MEMORY_MAX_CHARS = 24_000
+
+
+async def load_project_memory(cwd: str) -> str:
+    """读取项目目录下优先级最高的记忆文件，拼成 system prompt 附加段；
+    没有则返回空串。"""
+    for name in _MEMORY_FILES:
+        path = anyio.Path(cwd) / name
+        if not await path.exists():
+            continue
+        text = (await path.read_text(encoding="utf-8", errors="replace")).strip()
+        if len(text) > _MEMORY_MAX_CHARS:
+            text = text[:_MEMORY_MAX_CHARS] + "\n…(truncated)"
+        if text:
+            return f"## Project instructions (from {name} in the working directory)\n\n{text}"
+    return ""
+
+
+class SteeringMiddleware(AgentMiddleware):
+    """运行中追加的用户消息在下一次模型调用前注入对话（queue 由本次运行的
+    Run 对象持有，路由层运行中收到新消息时入队）。注入的消息随 checkpoint
+    落库，成为正式对话历史。"""
+
+    def __init__(self, queue: list[str]):
+        super().__init__()
+        self.queue = queue
+
+    def before_model(self, state, runtime):
+        if not self.queue:
+            return None
+        texts = []
+        while self.queue:
+            texts.append(self.queue.pop(0))
+        return {"messages": [HumanMessage(t) for t in texts]}
+
 
 def build_model(resolved: dict, params: dict | None = None):
     """`resolved` is the concrete model config from providers.resolve_model;
@@ -45,6 +84,9 @@ def build_model(resolved: dict, params: dict | None = None):
         # 自定义 httpx 客户端：屏蔽系统代理（trust_env）并跳过证书校验
         "http_client": httpx.Client(trust_env=False, verify=False),
         "http_async_client": httpx.AsyncClient(trust_env=False, verify=False),
+        # 自定义 base_url 时 langchain-openai 不会自动开启流式 usage 上报，
+        # 必须显式打开，否则拿不到 token 用量
+        "stream_usage": True,
     }
     if params.get("temperature") is not None:
         kwargs["temperature"] = float(params["temperature"])
@@ -126,6 +168,7 @@ async def build_agent(
     params: dict | None = None,
     skill_dirs: list[str] | None = None,
     allow: dict | None = None,
+    steering_queue: list[str] | None = None,
 ):
     """Build a deep agent for one session. Returns (agent, mcp_errors)."""
     mcp_tools, mcp_errors = await get_mcp_tools(mcp_servers or [])
@@ -144,13 +187,22 @@ async def build_agent(
         if await anyio.Path(d).exists():
             skills.append(d if d.endswith("/") else d + "/")
 
+    system_prompt = SYSTEM_PROMPT
+    memory = await load_project_memory(cwd)
+    if memory:
+        system_prompt += "\n\n" + memory
+
+    middleware = [TodoListMiddleware()]
+    if steering_queue is not None:
+        middleware.append(SteeringMiddleware(steering_queue))
+
     agent = create_deep_agent(
         model=build_model(model, params),
         backend=backend,
         tools=mcp_tools,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         checkpointer=checkpointer,
-        middleware=[TodoListMiddleware()],
+        middleware=middleware,
         **({"skills": skills} if skills else {}),
         interrupt_on=build_interrupt_on(
             approval_mode or "dangerous",

@@ -80,6 +80,7 @@ class Run:
         self.status = "running"  # running | done | error | aborted
         self.error: str | None = None
         self.cutoff = 0  # serialized-history length when the run started
+        self.pending: list[str] = []  # 运行中追加的用户消息，待注入对话
 
     def push(self, obj: dict):
         last = self.events[-1] if self.events else None
@@ -108,6 +109,13 @@ def active_run(session_id: str) -> Run | None:
     return run if run and not run.done else None
 
 
+def enqueue_message(run: Run, text: str) -> None:
+    """运行中追加用户消息：入队并立即广播（SteeringMiddleware 在下一次模型
+    调用前注入；运行结束仍未注入的由 loop 作为新一轮输入续发）。"""
+    run.pending.append(text)
+    run.push({"type": "user", "text": text})
+
+
 def project_key_for(session: dict) -> str:
     """模型与参数跟随项目。「项目」即会话的工作目录；自动创建的 workspace
     里的会话共享虚拟项目 __standalone__。"""
@@ -120,7 +128,7 @@ def thread_config(session_id: str) -> dict:
     return {"configurable": {"thread_id": session_id}}
 
 
-async def get_session_agent(db: Session, checkpointer, session: dict):
+async def get_session_agent(db: Session, checkpointer, session: dict, steering_queue: list[str] | None = None):
     project_key = project_key_for(session)
     return await build_agent(
         cwd=session["cwd"],
@@ -131,6 +139,7 @@ async def get_session_agent(db: Session, checkpointer, session: dict):
         params=resolve_params(db, project_key),
         skill_dirs=[expand_path(d) for d in get_skill_dirs(db)],
         allow=(get_setting(db, "approvalAllowlist", {}) or {}).get(project_key),
+        steering_queue=steering_queue,
     )
 
 
@@ -143,9 +152,12 @@ async def start_run(db: Session, checkpointer, session: dict, input, user_text: 
     # Reserve the busy slot before the (slow) agent build so concurrent
     # POSTs can't start a second run for the same session.
     prev = runs.get(session["id"])
+    # 上一次运行因审批中断而结束时，排队的消息尚未注入——接力给本次运行
+    if prev:
+        run.pending = prev.pending
     runs[session["id"]] = run
     try:
-        agent, mcp_errors = await get_session_agent(db, checkpointer, session)
+        agent, mcp_errors = await get_session_agent(db, checkpointer, session, steering_queue=run.pending)
         state = await agent.aget_state(thread_config(session["id"]))
         run.cutoff = len(serialize_history((state.values or {}).get("messages")))
         if user_text is not None:
@@ -159,60 +171,87 @@ async def start_run(db: Session, checkpointer, session: dict, input, user_text: 
             runs.pop(session["id"], None)
         raise
 
+    async def stream_pass(current_input) -> bool:
+        """跑一遍 astream，返回是否以审批中断收尾。"""
+        interrupted = False
+        async for mode, data in agent.astream(
+            current_input,
+            config=thread_config(session["id"]),
+            stream_mode=["messages", "updates"],
+        ):
+            if mode == "messages":
+                msg, _meta = data
+                if type(msg).__name__ in ("AIMessageChunk", "ChatMessageChunk"):
+                    text = content_to_text(msg.content)
+                    if text:
+                        run.push({"type": "ai_delta", "text": text})
+                    reasoning = (msg.additional_kwargs or {}).get("reasoning_content")
+                    if reasoning:
+                        run.push({"type": "reasoning_delta", "text": reasoning})
+                # 每次模型调用的最后一个 chunk 带累计 usage（含子代理的调用）
+                usage = getattr(msg, "usage_metadata", None)
+                if usage:
+                    run.push(
+                        {
+                            "type": "usage",
+                            "inputTokens": usage.get("input_tokens", 0),
+                            "outputTokens": usage.get("output_tokens", 0),
+                            "totalTokens": usage.get("total_tokens", 0),
+                        }
+                    )
+            elif mode == "updates":
+                if "__interrupt__" in data:
+                    interrupted = True
+                    run.push(
+                        {
+                            "type": "interrupt",
+                            "interrupts": serialize_interrupt_values(data["__interrupt__"]),
+                        }
+                    )
+                    continue
+                for update in data.values():
+                    if not isinstance(update, dict):
+                        continue
+                    # surface completed AI messages (for tool_calls), tool
+                    # results and todos
+                    if isinstance(update.get("todos"), list):
+                        run.push({"type": "todos", "todos": update["todos"]})
+                    for m in update.get("messages") or []:
+                        t = getattr(m, "type", None)
+                        if t == "ai" and getattr(m, "tool_calls", None):
+                            run.push(
+                                {
+                                    "type": "tool_calls",
+                                    "calls": [
+                                        {"id": c.get("id"), "name": c.get("name"), "args": c.get("args")}
+                                        for c in m.tool_calls
+                                    ],
+                                }
+                            )
+                        elif t == "tool":
+                            run.push(
+                                {
+                                    "type": "tool_result",
+                                    "id": m.tool_call_id,
+                                    "name": m.name,
+                                    "text": content_to_text(m.content)[:20000],
+                                    "status": getattr(m, "status", None) or "success",
+                                }
+                            )
+        return interrupted
+
     async def loop():
         try:
-            async for mode, data in agent.astream(
-                input,
-                config=thread_config(session["id"]),
-                stream_mode=["messages", "updates"],
-            ):
-                if mode == "messages":
-                    msg, _meta = data
-                    if type(msg).__name__ in ("AIMessageChunk", "ChatMessageChunk"):
-                        text = content_to_text(msg.content)
-                        if text:
-                            run.push({"type": "ai_delta", "text": text})
-                        reasoning = (msg.additional_kwargs or {}).get("reasoning_content")
-                        if reasoning:
-                            run.push({"type": "reasoning_delta", "text": reasoning})
-                elif mode == "updates":
-                    if "__interrupt__" in data:
-                        run.push(
-                            {
-                                "type": "interrupt",
-                                "interrupts": serialize_interrupt_values(data["__interrupt__"]),
-                            }
-                        )
-                        continue
-                    for update in data.values():
-                        if not isinstance(update, dict):
-                            continue
-                        # surface completed AI messages (for tool_calls), tool
-                        # results and todos
-                        if isinstance(update.get("todos"), list):
-                            run.push({"type": "todos", "todos": update["todos"]})
-                        for m in update.get("messages") or []:
-                            t = getattr(m, "type", None)
-                            if t == "ai" and getattr(m, "tool_calls", None):
-                                run.push(
-                                    {
-                                        "type": "tool_calls",
-                                        "calls": [
-                                            {"id": c.get("id"), "name": c.get("name"), "args": c.get("args")}
-                                            for c in m.tool_calls
-                                        ],
-                                    }
-                                )
-                            elif t == "tool":
-                                run.push(
-                                    {
-                                        "type": "tool_result",
-                                        "id": m.tool_call_id,
-                                        "name": m.name,
-                                        "text": content_to_text(m.content)[:20000],
-                                        "status": getattr(m, "status", None) or "success",
-                                    }
-                                )
+            current_input = input
+            while True:
+                interrupted = await stream_pass(current_input)
+                # 中断（等审批）时排队消息留在 pending，接力给 resume 的运行；
+                # 正常收尾且还有排队消息 → 作为新一轮输入继续跑
+                if interrupted or not run.pending:
+                    break
+                texts = list(run.pending)
+                run.pending.clear()
+                current_input = {"messages": [{"role": "user", "content": t} for t in texts]}
             # 运行在请求结束后仍在后台继续，不能复用请求作用域的会话
             with SessionLocal() as bg_db:
                 touch_session(bg_db, session["id"])
@@ -221,6 +260,7 @@ async def start_run(db: Session, checkpointer, session: dict, input, user_text: 
             run.push({"type": "done"})
         except asyncio.CancelledError:
             run.status = "aborted"
+            run.pending.clear()  # 停止即放弃尚未注入的排队消息
             run.push({"type": "done", "aborted": True})
         except Exception as e:
             run.status = "error"

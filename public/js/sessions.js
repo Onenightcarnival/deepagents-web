@@ -4,7 +4,7 @@
 import { $, esc, relTime, baseName, shortPath } from "./utils.js";
 import { api, CTX } from "./api.js";
 import { state, saveCollapsed } from "./state.js";
-import { setTopbar, projectKeyOf, projectLabel, saveAllowlist } from "./topbar.js";
+import { setTopbar, renderUsage, projectKeyOf, projectLabel, saveAllowlist } from "./topbar.js";
 import { requestNotifyPermission, notifyApproval, notifyRunEnd } from "./notify.js";
 import {
   resetChat, removeEmptyHint, showEmptyHint, addUserMsg, newAssistantTurn,
@@ -16,10 +16,10 @@ import {
 // ------------------------------------------------------------ streaming
 function setStreaming(on, statusText) {
   state.streaming = on;
-  $("btn-send").style.display = on ? "none" : "";
+  // 运行中发送按钮保留：输入的消息会排队注入当前运行（steering）
   $("btn-stop").style.display = on ? "" : "none";
   $("status-line").innerHTML = on
-    ? `<span class="spinner"></span> ${esc(statusText ?? "运行中…")}`
+    ? `<span class="spinner"></span> ${esc(statusText ?? "运行中… 可继续输入，消息将在下一步注入")}`
     : "";
 }
 
@@ -59,6 +59,11 @@ function handleEvent(ev) {
       break;
     case "tool_result": setToolResult(ev.id, ev.name, ev.text, ev.status); break;
     case "todos": renderTodos(ev.todos); break;
+    case "usage":
+      state.usage.context = ev.inputTokens + ev.outputTokens;
+      state.usage.total += ev.totalTokens;
+      renderUsage();
+      break;
     case "interrupt": {
       finalizeThink(state.liveAssistant);
       showApproval(ev.interrupts);
@@ -117,11 +122,20 @@ async function startRunRequest(url, body, opts) {
 
 export function sendMessage() {
   const text = $("input").value.trim();
-  if (!text || state.streaming) return;
+  if (!text) return;
   if (!state.current) { openNewSessionModal(); return; }
   requestNotifyPermission();
   $("input").value = "";
   autoGrow();
+  if (state.streaming) {
+    // 运行中追加（steering）：不本地渲染，消息经服务端入队后由 /stream
+    // 的 user 事件回显；若恰好赶上运行刚结束（queued=false，服务端已直接
+    // 开新运行），重新挂上事件流即可
+    api(`/sessions/${state.current.id}/messages`, { method: "POST", body: { content: text } })
+      .then((res) => { if (!res.queued) attachStream(); })
+      .catch((e) => addWarnBanner("追加消息失败: " + e.message));
+    return;
+  }
   removeEmptyHint();
   addUserMsg(text);
   scrollBottom(true);
@@ -260,6 +274,7 @@ export async function selectSession(s) {
   detachStream();
   setStreaming(false);
   state.current = s;
+  state.usage = { context: 0, total: 0 };
   setTopbar();
   resetChat();
   renderTodos([]);
@@ -273,6 +288,15 @@ export async function selectSession(s) {
     // 运行中：历史只渲染到本轮起点，本轮内容由 /stream 回放重建，避免重复
     let msgs = h.busy && h.runCutoff != null ? h.messages.slice(0, h.runCutoff) : h.messages;
     const total = msgs.length;
+    // 从历史恢复 token 用量（运行中只算到本轮起点，本轮的由 usage 事件回放补上）
+    state.usage = { context: 0, total: 0 };
+    for (const m of msgs) {
+      if (m.role === "assistant" && m.usage) {
+        state.usage.context = m.usage.inputTokens + m.usage.outputTokens;
+        state.usage.total += m.usage.totalTokens;
+      }
+    }
+    renderUsage();
     // 长会话只渲染最近一段（截断点退到用户消息边界，保住工具行与结果的配对）
     if (!fullHistory.has(s.id) && msgs.length > HISTORY_LIMIT) {
       let start = msgs.length - HISTORY_LIMIT;
