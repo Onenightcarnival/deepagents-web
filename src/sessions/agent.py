@@ -2,6 +2,8 @@
 backend + human-in-the-loop approvals + MCP tools + SQLite checkpointer.
 """
 
+import re
+
 import anyio
 import httpx
 from deepagents import create_deep_agent
@@ -67,23 +69,50 @@ def build_model(resolved: dict, params: dict | None = None):
     return ChatOpenAI(base_url=base_url, **kwargs)
 
 
-def build_interrupt_on(approval_mode: str, mcp_tool_names: list[str]) -> dict | None:
+# 命令替换/重定向可以把无害前缀变成任意读写，含这些标记的命令不走白名单
+_EXEC_UNSAFE = ("$(", "`", ">", "<")
+_EXEC_SPLIT = re.compile(r"&&|\|\||[;|\n]")
+
+
+def execute_allowlisted(command: str, prefixes: list[str]) -> bool:
+    """复合命令按控制符拆段，每一段都命中某个白名单前缀才放行。引号内的
+    控制符也会被拆开，导致段落匹配失败——方向是多问而不是漏问，可接受。"""
+    if any(tok in command for tok in _EXEC_UNSAFE):
+        return False
+    segments = [s.strip() for s in _EXEC_SPLIT.split(command) if s.strip()]
+    return bool(segments) and all(any(seg == p or seg.startswith(p + " ") for p in prefixes) for seg in segments)
+
+
+def build_interrupt_on(approval_mode: str, mcp_tool_names: list[str], allow: dict | None = None) -> dict | None:
+    """按审批模式生成 interrupt_on 配置。`allow` 是项目审批白名单
+    （{"execute": [命令前缀], "tools": [工具名]}）：命中的 execute 调用由
+    `when` 谓词自动放行，白名单里的工具名显式关闭审批（False 同时覆盖
+    deepagents 对文件系统工具的默认审批配置）。"""
     if approval_mode == "off":
         return None
-    gated: dict = {
-        "execute": True,
-        "write_file": True,
-        "edit_file": True,
-        "delete": True,
-    }
+    allow = allow or {}
+    allowed_tools = set(allow.get("tools") or [])
+    exec_prefixes = [p.strip() for p in allow.get("execute") or [] if p.strip()]
+
+    def gate(name: str):
+        if name in allowed_tools:
+            return False
+        if name == "execute" and exec_prefixes:
+            return {
+                "allowed_decisions": ["approve", "edit", "reject"],
+                "when": lambda req: (
+                    not execute_allowlisted((req.tool_call.get("args") or {}).get("command") or "", exec_prefixes)
+                ),
+            }
+        return True
+
+    gated: dict = {name: gate(name) for name in ("execute", "write_file", "edit_file", "delete")}
     if approval_mode == "all":
-        for name in ("ls", "read_file", "glob", "grep"):
-            gated[name] = True
-        for name in mcp_tool_names:
-            gated[name] = True
+        for name in ("ls", "read_file", "glob", "grep", *mcp_tool_names):
+            gated[name] = gate(name)
     elif approval_mode == "dangerous+mcp":
         for name in mcp_tool_names:
-            gated[name] = True
+            gated[name] = gate(name)
     return gated
 
 
@@ -96,6 +125,7 @@ async def build_agent(
     model: dict,
     params: dict | None = None,
     skill_dirs: list[str] | None = None,
+    allow: dict | None = None,
 ):
     """Build a deep agent for one session. Returns (agent, mcp_errors)."""
     mcp_tools, mcp_errors = await get_mcp_tools(mcp_servers or [])
@@ -125,6 +155,7 @@ async def build_agent(
         interrupt_on=build_interrupt_on(
             approval_mode or "dangerous",
             [t.name for t in mcp_tools],
+            allow,
         ),
     )
     return agent, mcp_errors

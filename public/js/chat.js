@@ -27,8 +27,40 @@ function updateStick() {
   setStick(box.scrollHeight - box.scrollTop - box.clientHeight < 80);
 }
 
+// ------------------------------------------------------------ 流式渲染节流
+// 每个增量都全量重渲染 markdown，长回复会明显卡顿；把 120ms 内的增量合并成
+// 一次渲染。分段切换（新工具行、新正文段、审批卡片）和运行结束时立即冲刷。
+let pendingRender = null; // { turn, timer }
+
+function renderTurnText(turn) {
+  turn.textEl.innerHTML = renderMd(turn.text);
+  enhanceContent(turn.textEl);
+}
+
+export function flushAiRender() {
+  if (!pendingRender) return;
+  clearTimeout(pendingRender.timer);
+  const turn = pendingRender.turn;
+  pendingRender = null;
+  if (turn.textEl) renderTurnText(turn);
+}
+
+function scheduleRender(turn) {
+  if (pendingRender && pendingRender.turn !== turn) flushAiRender();
+  if (pendingRender) return;
+  pendingRender = {
+    turn,
+    timer: setTimeout(() => {
+      pendingRender = null;
+      renderTurnText(turn);
+      scrollBottom();
+    }, 120),
+  };
+}
+
 // ------------------------------------------------------------ 消息
 export function resetChat() {
+  if (pendingRender) { clearTimeout(pendingRender.timer); pendingRender = null; }
   chatEl.innerHTML = "";
   state.liveAssistant = null;
 }
@@ -88,6 +120,7 @@ export function appendAiText(text) {
   const turn = liveTurn();
   finalizeThink(turn);
   if (!turn.textEl || turn.textEl !== turn.body.lastElementChild) {
+    flushAiRender();
     turn.textEl = document.createElement("div");
     turn.textEl.className = "content";
     turn.text = "";
@@ -96,8 +129,7 @@ export function appendAiText(text) {
   turn.text += text;
   turn.fullText += text;
   turn.actions.style.display = "";
-  turn.textEl.innerHTML = renderMd(turn.text);
-  enhanceContent(turn.textEl);
+  scheduleRender(turn);
   scrollBottom();
 }
 
@@ -172,6 +204,7 @@ export function hasToolRow(id) {
 }
 
 export function addToolCard(call) {
+  flushAiRender();
   const turn = liveTurn();
   finalizeThink(turn);
   let group = turn.body.lastElementChild;
@@ -232,6 +265,15 @@ export function addWarnBanner(text) {
   scrollBottom();
 }
 
+// 历史被截断时顶部的「显示更早消息」入口
+export function addHistoryGap(count, onClick) {
+  const div = document.createElement("div");
+  div.className = "history-gap";
+  div.innerHTML = `<button type="button">显示更早的 ${count} 条消息</button>`;
+  div.querySelector("button").onclick = onClick;
+  chatEl.appendChild(div);
+}
+
 export function renderTodos(todos) {
   const el = $("todos");
   if (!todos || todos.length === 0) { el.classList.remove("visible"); return; }
@@ -243,6 +285,9 @@ export function renderTodos(todos) {
 }
 
 // ------------------------------------------------------------ 审批卡片
+// 每个操作独立决策（批准/拒绝），execute 的命令可编辑后批准（后端 decision
+// type=edit），勾选「总是允许」把命令前缀/工具名加入项目审批白名单。
+// handler(decisions, allowAdds)：decisions 与 actions 顺序一一对应。
 let approvalHandler = () => {};
 export function setApprovalHandler(fn) { approvalHandler = fn; }
 
@@ -252,36 +297,123 @@ function actionDetailHTML(a) {
   return `<pre>${esc(JSON.stringify(a.args ?? {}, null, 2))}</pre>`;
 }
 
+// 白名单前缀建议：取首段命令的前两个词（第二个词是选项时只取第一个），
+// 例如 `git status --short` → `git status`，`ls -la` → `ls`
+function suggestPrefix(command) {
+  const seg = (command ?? "").split(/&&|\|\||[;|\n]/)[0].trim();
+  const tokens = seg.split(/\s+/).filter(Boolean);
+  if (!tokens.length) return "";
+  return tokens[1] && !tokens[1].startsWith("-") ? `${tokens[0]} ${tokens[1]}` : tokens[0];
+}
+
+function buildApprovalRow(a, canEdit) {
+  const isExec = a.name === "execute";
+  const row = document.createElement("div");
+  row.className = "ap-action";
+  const allowTarget = isExec ? suggestPrefix(a.args?.command) : a.name;
+  row.innerHTML = `
+    <div class="ap-head">
+      <span class="t-ico">${TOOL_ICONS[a.name] ?? "🔧"}</span>
+      <span class="t-name">${esc(a.name)}</span>
+      <span class="ap-seg">
+        <button type="button" data-v="approve" class="on">批准</button>
+        <button type="button" data-v="reject">拒绝</button>
+      </span>
+    </div>
+    <div class="ap-detail"></div>
+    <label class="ap-always">
+      <input type="checkbox">
+      <span>本项目总是允许 <code class="ap-allow-target"></code>，不再询问</span>
+    </label>`;
+  row.querySelector(".ap-allow-target").textContent = allowTarget;
+  const detail = row.querySelector(".ap-detail");
+  if (isExec && canEdit) {
+    const ta = document.createElement("textarea");
+    ta.className = "ap-cmd mono";
+    ta.value = a.args?.command ?? "";
+    ta.rows = Math.min(6, ta.value.split("\n").length + 1);
+    // 编辑命令后，白名单建议前缀跟着最终要执行的命令走
+    ta.oninput = () => { row.querySelector(".ap-allow-target").textContent = suggestPrefix(ta.value); };
+    detail.appendChild(ta);
+    row._cmd = ta;
+  } else {
+    detail.innerHTML = actionDetailHTML(a);
+  }
+  row._decision = "approve";
+  for (const btn of row.querySelectorAll(".ap-seg button")) {
+    btn.onclick = () => {
+      row._decision = btn.dataset.v;
+      for (const b of row.querySelectorAll(".ap-seg button")) b.classList.toggle("on", b === btn);
+      row.classList.toggle("rejected", row._decision === "reject");
+      row._onChange?.();
+    };
+  }
+  return row;
+}
+
 export function showApproval(interrupts) {
+  flushAiRender();
   const actions = interrupts.flatMap(i => i.actionRequests);
   if (actions.length === 0) return;
+  // reviewConfigs 里是各工具允许的决策类型；缺省按全允许处理
+  const allowedDecisions = new Map();
+  for (const i of interrupts) {
+    for (const rc of i.reviewConfigs ?? []) allowedDecisions.set(rc.actionName, rc.allowedDecisions ?? []);
+  }
+  const canEdit = (name) => (allowedDecisions.get(name) ?? ["approve", "edit", "reject"]).includes("edit");
+
   const div = document.createElement("div");
   div.className = "approval";
-  div.innerHTML = `
-    <h4>⚠ Agent 请求执行以下操作（${actions.length} 项）</h4>
-    ${actions.map(a => `
-      <div><strong style="font-family:monospace">${esc(a.name)}</strong></div>
-      ${actionDetailHTML(a)}
-    `).join("")}
+  div.innerHTML = `<h4>⚠ Agent 请求执行以下操作（${actions.length} 项）</h4>`;
+  const rows = actions.map(a => buildApprovalRow(a, canEdit(a.name)));
+  for (const row of rows) div.appendChild(row);
+  const foot = document.createElement("div");
+  foot.innerHTML = `
     <div class="field">
-      <input type="text" id="reject-reason" placeholder="拒绝理由（可选，拒绝时反馈给模型）">
+      <input type="text" class="ap-reason" placeholder="拒绝理由（可选，反馈给模型）">
     </div>
     <div class="buttons">
-      <button class="primary" id="btn-approve">批准执行</button>
-      <button class="danger" id="btn-reject">拒绝</button>
+      <button class="primary ap-submit">批准执行</button>
     </div>`;
+  div.appendChild(foot);
+
+  const submitBtn = foot.querySelector(".ap-submit");
+  const updateSubmit = () => {
+    const ds = rows.map(r => r._decision);
+    submitBtn.textContent = ds.every(d => d === "approve") ? "批准执行"
+      : ds.every(d => d === "reject") ? "全部拒绝" : "提交决定";
+    submitBtn.classList.toggle("danger", ds.every(d => d === "reject"));
+    submitBtn.classList.toggle("primary", !ds.every(d => d === "reject"));
+  };
+  for (const row of rows) row._onChange = updateSubmit;
+
+  submitBtn.onclick = () => {
+    const reason = foot.querySelector(".ap-reason").value.trim();
+    const decisions = actions.map((a, i) => {
+      const row = rows[i];
+      if (row._decision === "reject") return { type: "reject", message: reason || "用户拒绝了该操作" };
+      // 命令被改过 → edit 决策（键名走 langchain 的 snake_case 约定）
+      if (row._cmd && row._cmd.value !== (a.args?.command ?? "")) {
+        return { type: "edit", edited_action: { name: a.name, args: { ...a.args, command: row._cmd.value } } };
+      }
+      return { type: "approve" };
+    });
+    const allowAdds = [];
+    rows.forEach((row, i) => {
+      if (row._decision !== "approve" || !row.querySelector(".ap-always input").checked) return;
+      const a = actions[i];
+      if (a.name === "execute") {
+        const prefix = suggestPrefix(row._cmd ? row._cmd.value : a.args?.command);
+        if (prefix) allowAdds.push({ tool: "execute", prefix });
+      } else {
+        allowAdds.push({ tool: a.name });
+      }
+    });
+    div.remove();
+    approvalHandler(decisions, allowAdds);
+  };
   chatEl.appendChild(div);
   scrollBottom();
-  const finish = () => div.remove();
-  div.querySelector("#btn-approve").onclick = () => {
-    finish();
-    approvalHandler(actions.map(() => ({ type: "approve" })));
-  };
-  div.querySelector("#btn-reject").onclick = () => {
-    const reason = div.querySelector("#reject-reason").value.trim();
-    finish();
-    approvalHandler(actions.map(() => ({ type: "reject", message: reason || "用户拒绝了该操作" })));
-  };
 }
 
 // ------------------------------------------------------------ 事件挂载

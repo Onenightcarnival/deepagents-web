@@ -27,3 +27,24 @@ def update_project_config(db: Session, key: str, model, params, has_model: bool,
     cfg[key] = entry
     set_setting(db, "projectConfig", cfg)
     return entry
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    out = []
+    for item in items:
+        item = item.strip()
+        if item and item not in out:
+            out.append(item)
+    return out
+
+
+def update_allowlist(db: Session, key: str, execute: list[str], tools: list[str]) -> dict:
+    """全量替换一个项目的审批白名单；两个列表都为空时删除该项目条目。"""
+    cfg = get_setting(db, "approvalAllowlist", {})
+    entry = {"execute": _dedupe(execute), "tools": _dedupe(tools)}
+    if entry["execute"] or entry["tools"]:
+        cfg[key] = entry
+    else:
+        cfg.pop(key, None)
+    set_setting(db, "approvalAllowlist", cfg)
+    return entry

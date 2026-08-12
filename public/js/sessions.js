@@ -4,13 +4,13 @@
 import { $, esc, relTime, baseName, shortPath } from "./utils.js";
 import { api, CTX } from "./api.js";
 import { state, saveCollapsed } from "./state.js";
-import { setTopbar, projectKeyOf, projectLabel } from "./topbar.js";
+import { setTopbar, projectKeyOf, projectLabel, saveAllowlist } from "./topbar.js";
 import { requestNotifyPermission, notifyApproval, notifyRunEnd } from "./notify.js";
 import {
   resetChat, removeEmptyHint, showEmptyHint, addUserMsg, newAssistantTurn,
   appendAiText, appendReasoning, finalizeThink, addHistoryThink, addToolCard,
   setToolResult, hasToolRow, addWarnBanner, renderTodos, showApproval,
-  setApprovalHandler, toolArgSummary, scrollBottom,
+  setApprovalHandler, toolArgSummary, scrollBottom, flushAiRender, addHistoryGap,
 } from "./chat.js";
 
 // ------------------------------------------------------------ streaming
@@ -67,8 +67,8 @@ function handleEvent(ev) {
       break;
     }
     case "warning": addWarnBanner(ev.message); break;
-    case "error": addWarnBanner("错误: " + ev.message); break;
-    case "done": finalizeThink(state.liveAssistant); break;
+    case "error": flushAiRender(); addWarnBanner("错误: " + ev.message); break;
+    case "done": flushAiRender(); finalizeThink(state.liveAssistant); break;
   }
 }
 
@@ -128,7 +128,15 @@ export function sendMessage() {
   startRunRequest(`/sessions/${state.current.id}/messages`, { content: text }, { skipUser: true });
 }
 
-function resumeRun(decisions) {
+async function resumeRun(decisions, allowAdds = []) {
+  // 先落白名单再恢复运行：resume 会重建 agent，本轮后续同类调用即可自动放行
+  if (allowAdds.length) {
+    try {
+      await saveAllowlist(allowAdds);
+    } catch (e) {
+      addWarnBanner("保存审批白名单失败: " + e.message);
+    }
+  }
   startRunRequest(`/sessions/${state.current.id}/resume`, { decisions }, { statusText: "执行已审批的操作…" });
 }
 setApprovalHandler(resumeRun);
@@ -237,11 +245,16 @@ function renderSessionItem(s) {
       addWarnBanner("删除会话失败: " + err.message);
       return;
     }
+    fullHistory.delete(s.id);
     if (state.current?.id === s.id) { state.current = null; resetChat(); setTopbar(); }
     loadSessions();
   };
   return item;
 }
+
+// 用户点过「显示更早消息」的会话——重进时直接渲染全量历史
+const fullHistory = new Set();
+const HISTORY_LIMIT = 80;
 
 export async function selectSession(s) {
   detachStream();
@@ -258,7 +271,17 @@ export async function selectSession(s) {
     setTopbar();
     state.liveAssistant = null;
     // 运行中：历史只渲染到本轮起点，本轮内容由 /stream 回放重建，避免重复
-    const msgs = h.busy && h.runCutoff != null ? h.messages.slice(0, h.runCutoff) : h.messages;
+    let msgs = h.busy && h.runCutoff != null ? h.messages.slice(0, h.runCutoff) : h.messages;
+    const total = msgs.length;
+    // 长会话只渲染最近一段（截断点退到用户消息边界，保住工具行与结果的配对）
+    if (!fullHistory.has(s.id) && msgs.length > HISTORY_LIMIT) {
+      let start = msgs.length - HISTORY_LIMIT;
+      while (start > 0 && msgs[start].role !== "user") start--;
+      if (start > 0) {
+        msgs = msgs.slice(start);
+        addHistoryGap(start, () => { fullHistory.add(s.id); selectSession(s); });
+      }
+    }
     for (const m of msgs) {
       if (m.role === "user") addUserMsg(m.text);
       else if (m.role === "assistant") {
@@ -270,13 +293,14 @@ export async function selectSession(s) {
         setToolResult(m.tool_call_id, m.name, m.text, m.status);
       }
     }
+    flushAiRender();
     renderTodos(h.todos);
     if (h.interrupts?.length) showApproval(h.interrupts);
     state.liveAssistant = null;
     if (!h.busy && h.lastRun?.status === "error" && h.lastRun.error) {
       addWarnBanner("上次运行出错: " + h.lastRun.error);
     }
-    if (msgs.length === 0 && !h.busy) showEmptyHint();
+    if (total === 0 && !h.busy) showEmptyHint();
     scrollBottom(true);
     if (h.busy) attachStream();
   } catch (e) {

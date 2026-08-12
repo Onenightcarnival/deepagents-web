@@ -6,16 +6,17 @@ import json
 import re
 import uuid
 from enum import StrEnum
+from urllib.parse import quote
 
 import anyio
 from fastapi import APIRouter, Depends, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from langgraph.types import Command
 from sqlalchemy.orm import Session
 
 from src.sessions import service
-from src.sessions.serialize import serialize_history, serialize_task_interrupts
-from src.sessions.service import Run, active_run, public_session, thread_config
+from src.sessions.serialize import history_to_markdown, serialize_history, serialize_task_interrupts
+from src.sessions.service import Run, active_run, thread_config
 from src.sessions.template import CreateSessionBody, MessageBody, PatchSessionBody, ResumeBody
 from src.utils.app_config import json_response
 from src.utils.database import get_db, get_db_with_commit
@@ -64,9 +65,7 @@ async def list_sessions(db: Session = Depends(get_db)):
         status.HTTP_200_OK,
         SessionCode.OK,
         MESSAGES[SessionCode.OK],
-        data={
-            "sessions": [{**public_session(s), "busy": bool(active_run(s["id"]))} for s in service.list_sessions(db)]
-        },
+        data={"sessions": [{**s, "busy": bool(active_run(s["id"]))} for s in service.list_sessions(db)]},
     )
 
 
@@ -87,9 +86,7 @@ async def create_session(body: CreateSessionBody | None = None, db: Session = De
         cwd = str(CONFIG.paths.workspace_root / id[:8])
         await anyio.Path(cwd).mkdir(parents=True, exist_ok=True)
     session = service.create_session(db, id, (body.title or "").strip() or "New session", cwd)
-    return json_response(
-        status.HTTP_200_OK, SessionCode.OK, MESSAGES[SessionCode.OK], data={"session": public_session(session)}
-    )
+    return json_response(status.HTTP_200_OK, SessionCode.OK, MESSAGES[SessionCode.OK], data={"session": session})
 
 
 def _get_session(db: Session, session_id: str) -> dict | None:
@@ -122,7 +119,7 @@ async def patch_session(session_id: str, body: PatchSessionBody, db: Session = D
         status.HTTP_200_OK,
         SessionCode.OK,
         MESSAGES[SessionCode.OK],
-        data={"session": public_session(service.update_session(db, session["id"], title=body.title))},
+        data={"session": service.update_session(db, session["id"], title=body.title)},
     )
 
 
@@ -140,7 +137,7 @@ async def session_history(session_id: str, request: Request, db: Session = Depen
         SessionCode.OK,
         MESSAGES[SessionCode.OK],
         data={
-            "session": public_session(session),
+            "session": session,
             "busy": busy,
             # 运行中回合在 messages 里的起点——客户端渲染到此为止，其余由
             # /stream 回放重建
@@ -150,6 +147,24 @@ async def session_history(session_id: str, request: Request, db: Session = Depen
             "todos": (state.values or {}).get("todos") or [],
             "interrupts": serialize_task_interrupts(state.tasks),
         },
+    )
+
+
+@router.get("/{session_id}/export")
+async def export_session(session_id: str, request: Request, db: Session = Depends(get_db)):
+    """导出会话历史为 Markdown 附件。checkpoint 的 channel 值是增量存储，
+    裸读拿不到完整 messages，必须与 /history 一样经 agent 的 aget_state 重建。"""
+    session = _get_session(db, session_id)
+    if not session:
+        return json_response(status.HTTP_404_NOT_FOUND, SessionCode.NOT_FOUND, MESSAGES[SessionCode.NOT_FOUND])
+    agent, _mcp_errors = await service.get_session_agent(db, request.app.state.checkpointer, session)
+    state = await agent.aget_state(thread_config(session["id"]))
+    messages = serialize_history((state.values or {}).get("messages"))
+    filename = quote(f"{session['title'][:40]}.md")
+    return Response(
+        history_to_markdown(session, messages),
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
     )
 
 

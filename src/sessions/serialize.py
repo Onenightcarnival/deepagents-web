@@ -2,6 +2,9 @@
 the web UI understands (same wire format as the previous JS backend).
 """
 
+import json
+import time
+
 
 def content_to_text(content) -> str:
     if isinstance(content, str):
@@ -77,3 +80,47 @@ def serialize_task_interrupts(tasks) -> list[dict]:
     for task in tasks or []:
         out.extend(serialize_interrupt_values(getattr(task, "interrupts", None)))
     return out
+
+
+# ---------------------------------------------------------------- Markdown 导出
+
+_EXPORT_RESULT_LIMIT = 4000
+
+
+def _tool_call_markdown(call: dict, results: dict[str, dict]) -> list[str]:
+    args = json.dumps(call.get("args") or {}, ensure_ascii=False, indent=2)
+    lines = [f"<details><summary>🔧 {call.get('name')}</summary>", "", "```json", args, "```"]
+    result = results.get(call.get("id"))
+    if result:
+        mark = "✗" if result.get("status") == "error" else "✓"
+        text = (result.get("text") or "").strip() or "(空)"
+        if len(text) > _EXPORT_RESULT_LIMIT:
+            text = text[:_EXPORT_RESULT_LIMIT] + "\n…（已截断）"
+        lines += ["", f"结果 {mark}:", "", "```", text, "```"]
+    lines += ["</details>", ""]
+    return lines
+
+
+def history_to_markdown(session: dict, messages: list[dict]) -> str:
+    """serialize_history 的结果 -> 可读的 Markdown 文档。工具结果按
+    tool_call_id 归并进所属的助手回合。"""
+    results = {m["tool_call_id"]: m for m in messages if m["role"] == "tool"}
+    lines = [
+        f"# {session['title']}",
+        "",
+        f"- 工作目录：`{session['cwd']}`",
+        f"- 导出时间：{time.strftime('%Y-%m-%d %H:%M:%S')}",
+        "",
+    ]
+    for m in messages:
+        if m["role"] == "user":
+            lines += ["## 🧑 用户", "", m["text"], ""]
+        elif m["role"] == "assistant":
+            lines += ["## 🤖 助手", ""]
+            if m.get("reasoning"):
+                lines += ["<details><summary>思考过程</summary>", "", m["reasoning"], "</details>", ""]
+            for call in m["tool_calls"]:
+                lines += _tool_call_markdown(call, results)
+            if m["text"]:
+                lines += [m["text"], ""]
+    return "\n".join(lines)

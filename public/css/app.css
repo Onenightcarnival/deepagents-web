@@ -327,6 +327,64 @@ button.ghost:hover { color: var(--text); }
 .approval .diff-box { margin-left: 0; margin-right: 0; background: var(--bg2); }
 .approval .buttons { display: flex; gap: 8px; margin-top: 10px; }
 .approval .field { margin-top: 8px; }
+/* 逐项审批行 */
+.ap-action {
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg);
+  padding: 9px 11px; margin: 8px 0;
+}
+.ap-head { display: flex; align-items: center; gap: 8px; }
+.ap-head .t-ico { flex: none; width: 16px; text-align: center; font-size: 12px; }
+.ap-head .t-name {
+  font-family: ui-monospace, monospace; font-weight: 600; font-size: 12.5px;
+  color: var(--accent);
+}
+.ap-seg {
+  margin-left: auto; display: flex; border: 1px solid var(--border);
+  border-radius: 6px; overflow: hidden; flex: none;
+}
+.ap-seg button {
+  background: none; border: none; border-radius: 0; color: var(--text-dim);
+  font-size: 12px; padding: 3px 12px;
+}
+.ap-seg button + button { border-left: 1px solid var(--border); }
+.ap-seg button.on { background: var(--bg3); color: var(--text); }
+.ap-seg button.on[data-v="approve"] { color: var(--green); }
+.ap-seg button.on[data-v="reject"] { color: var(--red); }
+.ap-action .ap-detail pre { margin-bottom: 0; }
+textarea.ap-cmd {
+  margin-top: 8px; font-size: 13px; line-height: 1.5; resize: vertical;
+  background: var(--bg2);
+}
+.ap-always {
+  display: flex; align-items: center; gap: 6px; margin-top: 8px;
+  font-size: 12px; color: var(--text-dim); cursor: pointer; user-select: none;
+}
+.ap-always code {
+  font-family: ui-monospace, monospace; color: var(--text);
+  background: var(--bg3); border-radius: 4px; padding: 0 5px;
+}
+.ap-action.rejected .ap-always { display: none; }
+.ap-action.rejected .ap-detail { opacity: 0.55; }
+/* ---------- 历史截断入口 ---------- */
+.history-gap { text-align: center; margin: 10px 0; }
+.history-gap button {
+  background: var(--bg2); color: var(--text-dim); font-size: 12px;
+  border-radius: 14px; padding: 4px 14px;
+}
+.history-gap button:hover { color: var(--text); }
+/* ---------- 审批白名单（模型弹层内） ---------- */
+.al-item {
+  display: flex; align-items: center; gap: 6px; padding: 3px 12px; font-size: 12px;
+}
+.al-item code {
+  flex: 1; font-family: ui-monospace, monospace; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.al-item .al-del {
+  background: none; border: none; color: var(--text-dim); padding: 0 4px;
+  font-size: 12px; flex: none;
+}
+.al-item .al-del:hover { color: var(--red); }
 #todos {
   border-top: 1px solid var(--border); padding: 8px 20px; font-size: 12px;
   color: var(--text-dim); display: none; max-height: 120px; overflow-y: auto;

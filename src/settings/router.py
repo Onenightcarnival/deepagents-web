@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from src.providers.service import model_exists, resolve_model
 from src.settings import service
-from src.settings.template import ProjectConfigBody, ProjectParams, SettingsBody
+from src.settings.template import AllowlistBody, ProjectConfigBody, ProjectParams, SettingsBody
 from src.utils.app_config import json_response
 from src.utils.database import get_db, get_db_with_commit
 from src.utils.resource_loader import CONFIG
@@ -44,6 +44,7 @@ async def get_config(db: Session = Depends(get_db)):
             "workspaceRoot": str(CONFIG.paths.workspace_root),
             "defaultModel": default_model,
             "projectConfig": service.get_setting(db, "projectConfig", {}),
+            "approvalAllowlist": service.get_setting(db, "approvalAllowlist", {}),
         },
     )
 
@@ -77,4 +78,12 @@ async def post_project_config(body: ProjectConfigBody, db: Session = Depends(get
     entry = service.update_project_config(db, body.key, model, params, has_model, has_params)
     return json_response(
         status.HTTP_200_OK, SettingsCode.OK, MESSAGES[SettingsCode.OK], data={"key": body.key, "config": entry}
+    )
+
+
+@router.post("/allowlist")
+async def post_allowlist(body: AllowlistBody, db: Session = Depends(get_db_with_commit)):
+    entry = service.update_allowlist(db, body.key, body.execute, body.tools)
+    return json_response(
+        status.HTTP_200_OK, SettingsCode.OK, MESSAGES[SettingsCode.OK], data={"key": body.key, "allowlist": entry}
     )

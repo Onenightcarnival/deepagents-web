@@ -1,6 +1,7 @@
-// 顶栏：会话标题、cwd chip、模型 chip（含项目级模型与参数弹层）、技能 chip
+// 顶栏：会话标题、cwd chip、模型 chip（含项目级模型/参数/审批白名单弹层）、
+// 技能 chip、导出按钮
 import { $, esc, baseName, shortPath } from "./utils.js";
-import { api } from "./api.js";
+import { api, CTX } from "./api.js";
 import { state } from "./state.js";
 
 // 会话归属的项目 key：workspaces/ 下的自动目录归入虚拟项目「独立会话」
@@ -30,6 +31,7 @@ export function setTopbar() {
   $("session-title").textContent = s ? s.title : "—";
   $("cwd-chip").textContent = s ? shortPath(s.cwd) : "";
   $("cwd-chip").style.display = s ? "" : "none";
+  $("btn-export").style.display = s ? "" : "none";
   renderModelChip();
 }
 
@@ -43,6 +45,34 @@ export function renderModelChip() {
   if (p.thinking === "off") parts.push("思考关");
   if (p.temperature != null) parts.push("T " + p.temperature);
   chip.childNodes[0].textContent = parts.join(" · ") + " ▾";
+}
+
+// ------------------------------------------------------------ 审批白名单
+async function postAllowlist(key, execute, tools) {
+  const res = await api("/settings/allowlist", { method: "POST", body: { key, execute, tools } });
+  state.config.approvalAllowlist ??= {};
+  if (res.allowlist.execute.length || res.allowlist.tools.length) {
+    state.config.approvalAllowlist[key] = res.allowlist;
+  } else {
+    delete state.config.approvalAllowlist[key];
+  }
+}
+
+// 审批卡片勾选「总是允许」后调用：adds = [{tool, prefix?}]，追加进当前项目的白名单
+export async function saveAllowlist(adds) {
+  const key = currentProjectKey();
+  if (!key || !adds.length) return;
+  const cur = state.config?.approvalAllowlist?.[key] ?? {};
+  const execute = [...(cur.execute ?? [])];
+  const tools = [...(cur.tools ?? [])];
+  for (const a of adds) {
+    if (a.tool === "execute") {
+      if (a.prefix && !execute.includes(a.prefix)) execute.push(a.prefix);
+    } else if (!tools.includes(a.tool)) {
+      tools.push(a.tool);
+    }
+  }
+  await postAllowlist(key, execute, tools);
 }
 
 async function saveProjectConfig(patch) {
@@ -119,7 +149,33 @@ async function renderModelMenu() {
     </div>
     <div class="pop-foot">模型与参数保存在项目上，对项目下所有会话生效；「独立会话」视为一个虚拟项目。${
       provType === "deepseek" ? "DeepSeek 思考开启时，温度等采样参数会被忽略。" : ""}</div>`;
+
+  // 审批白名单：命中的操作不再弹审批（在审批卡片勾选「总是允许」加入）
+  const al = state.config?.approvalAllowlist?.[key] ?? {};
+  const alItems = [
+    ...(al.execute ?? []).map(v => ({ kind: "execute", val: v, label: `execute: ${v}` })),
+    ...(al.tools ?? []).map(v => ({ kind: "tool", val: v, label: v })),
+  ];
+  html += `<hr><div class="m-sec">审批白名单</div>`;
+  if (alItems.length) {
+    html += alItems.map((it, i) =>
+      `<div class="al-item"><code>${esc(it.label)}</code><button type="button" class="al-del" data-i="${i}" title="移除">✕</button></div>`
+    ).join("");
+  } else {
+    html += `<div class="pop-foot" style="padding-top:0">空。审批时勾选「总是允许」加入，命中的操作不再询问。</div>`;
+  }
   menu.innerHTML = html;
+
+  for (const btn of menu.querySelectorAll(".al-del")) {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      const it = alItems[+btn.dataset.i];
+      const execute = (al.execute ?? []).filter(v => !(it.kind === "execute" && v === it.val));
+      const tools = (al.tools ?? []).filter(v => !(it.kind === "tool" && v === it.val));
+      try { await postAllowlist(key, execute, tools); } catch (err) { alert("保存失败: " + err.message); }
+      await renderModelMenu();
+    };
+  }
 
   const curParams = () => ({ ...params });
   for (const item of menu.querySelectorAll(".m-item")) {
@@ -182,6 +238,14 @@ export function renderSkillsChip() {
 }
 
 export function initTopbar() {
+  // 导出：后端返回 Content-Disposition attachment，直接触发下载
+  $("btn-export").onclick = () => {
+    if (!state.current) return;
+    const a = document.createElement("a");
+    a.href = `${CTX}/sessions/${state.current.id}/export`;
+    a.download = "";
+    a.click();
+  };
   $("model-chip").onclick = async (e) => {
     if (e.target.closest("#model-menu")) return;
     if (!state.current) return;

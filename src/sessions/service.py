@@ -7,8 +7,6 @@
 """
 
 import asyncio
-import contextlib
-import json
 import time
 
 from sqlalchemy import select
@@ -68,17 +66,6 @@ def update_session(db: Session, id: str, title: str | None = None) -> dict | Non
     if row and title is not None:
         row.title = title
     return get_session(db, id)
-
-
-def public_session(s: dict | None) -> dict | None:
-    """sessions 的 model 列是 JSON TEXT——对外暴露解析后的对象。"""
-    if not s:
-        return s
-    model = None
-    if s.get("model"):
-        with contextlib.suppress(Exception):
-            model = json.loads(s["model"])
-    return {**s, "model": model}
 
 
 # ---------------------------------------------------------------- 运行管理
@@ -143,6 +130,7 @@ async def get_session_agent(db: Session, checkpointer, session: dict):
         model=resolve_model(db, project_key),
         params=resolve_params(db, project_key),
         skill_dirs=[expand_path(d) for d in get_skill_dirs(db)],
+        allow=(get_setting(db, "approvalAllowlist", {}) or {}).get(project_key),
     )
 
 

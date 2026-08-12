@@ -33,3 +33,12 @@ class ProjectConfigBody(ApiModel):
     key: NonBlankStr
     model: ModelRef | None = None
     params: ProjectParams | None = None
+
+
+class AllowlistBody(ApiModel):
+    """项目审批白名单（全量替换语义）：execute 为命令前缀列表，tools 为
+    整体放行的工具名列表。"""
+
+    key: NonBlankStr
+    execute: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
