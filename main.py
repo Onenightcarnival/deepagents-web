@@ -1,4 +1,4 @@
-"""服务主程序：lifespan、router、middleware、exception handler、健康检查。
+"""服务主程序：lifespan、router、exception handler、健康检查。
 
   uv run python main.py [--env dev]   — 默认 http://127.0.0.1:3080
 
@@ -7,7 +7,7 @@
 """
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import IntegrityError
@@ -18,7 +18,9 @@ from src.sessions.router import router as sessions_router
 from src.settings.router import router as settings_router
 from src.skills.router import router as skills_router
 from src.utils.app_config import (
-    auth_middleware,
+    MESSAGES,
+    ServiceCode,
+    json_response,
     lifespan,
     on_error,
     on_integrity_error,
@@ -29,7 +31,6 @@ from src.utils.resource_loader import CONFIG, PUBLIC_DIR
 
 app = FastAPI(lifespan=lifespan)
 
-app.middleware("http")(auth_middleware)
 app.exception_handler(Exception)(on_error)
 app.exception_handler(RequestValidationError)(on_validation_error)
 app.exception_handler(IntegrityError)(on_integrity_error)
@@ -41,7 +42,7 @@ for module_router in (sessions_router, providers_router, settings_router, mcp_ro
 
 @app.get("/healthz")
 async def healthz():
-    return {"ok": True}
+    return json_response(status.HTTP_200_OK, ServiceCode.OK, MESSAGES[ServiceCode.OK])
 
 
 # 静态前端（放在 API 路由之后挂载，/api/* 优先匹配）

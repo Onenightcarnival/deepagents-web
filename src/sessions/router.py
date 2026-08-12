@@ -5,9 +5,10 @@ import contextlib
 import json
 import re
 import uuid
+from enum import StrEnum
 
 import anyio
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import StreamingResponse
 from langgraph.types import Command
 from sqlalchemy.orm import Session
@@ -16,11 +17,28 @@ from src.sessions import service
 from src.sessions.serialize import serialize_history, serialize_task_interrupts
 from src.sessions.service import Run, active_run, public_session, thread_config
 from src.sessions.template import CreateSessionBody, MessageBody, PatchSessionBody, ResumeBody
-from src.utils.app_config import api_ok, json_error
+from src.utils.app_config import json_response
 from src.utils.database import get_db, get_db_with_commit
 from src.utils.resource_loader import CONFIG
 
 router = APIRouter(prefix="/sessions")
+
+
+class SessionCode(StrEnum):
+    """sessions 模块业务状态码（三段式规则见 utils/app_config.py）。"""
+
+    OK = "WA-01-00"
+    NOT_FOUND = "WA-01-01"
+    BUSY = "WA-01-02"
+    DIR_NOT_FOUND = "WA-01-03"
+
+
+MESSAGES: dict[SessionCode, str] = {
+    SessionCode.OK: "成功",
+    SessionCode.NOT_FOUND: "会话不存在",
+    SessionCode.BUSY: "会话正在运行中",
+    SessionCode.DIR_NOT_FOUND: "目录不存在",
+}
 
 
 @router.get("/dirs/recent")
@@ -37,13 +55,18 @@ async def recent_dirs(db: Session = Depends(get_db)):
         dirs.append(s["cwd"])
         if len(dirs) >= 8:
             break
-    return api_ok({"dirs": dirs})
+    return json_response(status.HTTP_200_OK, SessionCode.OK, MESSAGES[SessionCode.OK], data={"dirs": dirs})
 
 
 @router.get("/")
 async def list_sessions(db: Session = Depends(get_db)):
-    return api_ok(
-        {"sessions": [{**public_session(s), "busy": bool(active_run(s["id"]))} for s in service.list_sessions(db)]}
+    return json_response(
+        status.HTTP_200_OK,
+        SessionCode.OK,
+        MESSAGES[SessionCode.OK],
+        data={
+            "sessions": [{**public_session(s), "busy": bool(active_run(s["id"]))} for s in service.list_sessions(db)]
+        },
     )
 
 
@@ -55,12 +78,18 @@ async def create_session(body: CreateSessionBody | None = None, db: Session = De
     if cwd:
         cwd = str(await (await anyio.Path(cwd).expanduser()).resolve())
         if not await anyio.Path(cwd).exists():
-            return json_error(f"directory not found: {cwd}")
+            return json_response(
+                status.HTTP_400_BAD_REQUEST,
+                SessionCode.DIR_NOT_FOUND,
+                f"{MESSAGES[SessionCode.DIR_NOT_FOUND]}: {cwd}",
+            )
     else:
         cwd = str(CONFIG.paths.workspace_root / id[:8])
         await anyio.Path(cwd).mkdir(parents=True, exist_ok=True)
     session = service.create_session(db, id, (body.title or "").strip() or "New session", cwd)
-    return api_ok({"session": public_session(session)})
+    return json_response(
+        status.HTTP_200_OK, SessionCode.OK, MESSAGES[SessionCode.OK], data={"session": public_session(session)}
+    )
 
 
 def _get_session(db: Session, session_id: str) -> dict | None:
@@ -73,7 +102,7 @@ def _get_session(db: Session, session_id: str) -> dict | None:
 async def delete_session(session_id: str, request: Request, db: Session = Depends(get_db_with_commit)):
     session = _get_session(db, session_id)
     if not session:
-        return json_error("session not found", 404)
+        return json_response(status.HTTP_404_NOT_FOUND, SessionCode.NOT_FOUND, MESSAGES[SessionCode.NOT_FOUND])
     run = active_run(session["id"])
     if run:
         run.abort()
@@ -81,28 +110,36 @@ async def delete_session(session_id: str, request: Request, db: Session = Depend
     service.delete_session(db, session["id"])
     with contextlib.suppress(Exception):
         await request.app.state.checkpointer.adelete_thread(session["id"])
-    return api_ok()
+    return json_response(status.HTTP_200_OK, SessionCode.OK, MESSAGES[SessionCode.OK])
 
 
 @router.patch("/{session_id}")
 async def patch_session(session_id: str, body: PatchSessionBody, db: Session = Depends(get_db_with_commit)):
     session = _get_session(db, session_id)
     if not session:
-        return json_error("session not found", 404)
-    return api_ok({"session": public_session(service.update_session(db, session["id"], title=body.title))})
+        return json_response(status.HTTP_404_NOT_FOUND, SessionCode.NOT_FOUND, MESSAGES[SessionCode.NOT_FOUND])
+    return json_response(
+        status.HTTP_200_OK,
+        SessionCode.OK,
+        MESSAGES[SessionCode.OK],
+        data={"session": public_session(service.update_session(db, session["id"], title=body.title))},
+    )
 
 
 @router.get("/{session_id}/history")
 async def session_history(session_id: str, request: Request, db: Session = Depends(get_db)):
     session = _get_session(db, session_id)
     if not session:
-        return json_error("session not found", 404)
+        return json_response(status.HTTP_404_NOT_FOUND, SessionCode.NOT_FOUND, MESSAGES[SessionCode.NOT_FOUND])
     agent, _mcp_errors = await service.get_session_agent(db, request.app.state.checkpointer, session)
     state = await agent.aget_state(thread_config(session["id"]))
     run = service.runs.get(session["id"])
     busy = bool(run and not run.done)
-    return api_ok(
-        {
+    return json_response(
+        status.HTTP_200_OK,
+        SessionCode.OK,
+        MESSAGES[SessionCode.OK],
+        data={
             "session": public_session(session),
             "busy": busy,
             # 运行中回合在 messages 里的起点——客户端渲染到此为止，其余由
@@ -112,7 +149,7 @@ async def session_history(session_id: str, request: Request, db: Session = Depen
             "messages": serialize_history((state.values or {}).get("messages")),
             "todos": (state.values or {}).get("todos") or [],
             "interrupts": serialize_task_interrupts(state.tasks),
-        }
+        },
     )
 
 
@@ -120,35 +157,35 @@ async def session_history(session_id: str, request: Request, db: Session = Depen
 async def post_message(session_id: str, body: MessageBody, request: Request, db: Session = Depends(get_db_with_commit)):
     session = _get_session(db, session_id)
     if not session:
-        return json_error("session not found", 404)
+        return json_response(status.HTTP_404_NOT_FOUND, SessionCode.NOT_FOUND, MESSAGES[SessionCode.NOT_FOUND])
     if active_run(session["id"]):
-        return json_error("session busy", 409)
+        return json_response(status.HTTP_409_CONFLICT, SessionCode.BUSY, MESSAGES[SessionCode.BUSY])
     content = body.content
     if session["title"] == "New session":
         service.touch_session(db, session["id"], content[:40])
         session["title"] = content[:40]
     checkpointer = request.app.state.checkpointer
     await service.start_run(db, checkpointer, session, {"messages": [{"role": "user", "content": content}]}, content)
-    return api_ok()
+    return json_response(status.HTTP_200_OK, SessionCode.OK, MESSAGES[SessionCode.OK])
 
 
 @router.post("/{session_id}/resume")
 async def post_resume(session_id: str, body: ResumeBody, request: Request, db: Session = Depends(get_db)):
     session = _get_session(db, session_id)
     if not session:
-        return json_error("session not found", 404)
+        return json_response(status.HTTP_404_NOT_FOUND, SessionCode.NOT_FOUND, MESSAGES[SessionCode.NOT_FOUND])
     if active_run(session["id"]):
-        return json_error("session busy", 409)
+        return json_response(status.HTTP_409_CONFLICT, SessionCode.BUSY, MESSAGES[SessionCode.BUSY])
     checkpointer = request.app.state.checkpointer
     await service.start_run(db, checkpointer, session, Command(resume={"decisions": body.decisions}))
-    return api_ok()
+    return json_response(status.HTTP_200_OK, SessionCode.OK, MESSAGES[SessionCode.OK])
 
 
 @router.get("/{session_id}/stream")
 async def session_stream(session_id: str, db: Session = Depends(get_db)):
     session = _get_session(db, session_id)
     if not session:
-        return json_error("session not found", 404)
+        return json_response(status.HTTP_404_NOT_FOUND, SessionCode.NOT_FOUND, MESSAGES[SessionCode.NOT_FOUND])
     return _stream_attach_response(service.runs.get(session["id"]))
 
 
@@ -156,11 +193,11 @@ async def session_stream(session_id: str, db: Session = Depends(get_db)):
 async def post_stop(session_id: str, db: Session = Depends(get_db)):
     session = _get_session(db, session_id)
     if not session:
-        return json_error("session not found", 404)
+        return json_response(status.HTTP_404_NOT_FOUND, SessionCode.NOT_FOUND, MESSAGES[SessionCode.NOT_FOUND])
     run = active_run(session["id"])
     if run:
         run.abort()
-    return api_ok()
+    return json_response(status.HTTP_200_OK, SessionCode.OK, MESSAGES[SessionCode.OK])
 
 
 def _stream_attach_response(run: Run | None) -> StreamingResponse:

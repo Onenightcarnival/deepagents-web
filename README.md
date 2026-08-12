@@ -51,14 +51,14 @@ uv run python -m test.check_model
 
 **MCP 服务器**（设置 → MCP 服务器）：仅支持 Streamable HTTP 传输（不依赖本机的 npx / bun / uv 环境）。左侧选择服务器，右侧分「通用 / 工具 / 提示词 / 资源」页签：通用页配置 URL 和鉴权请求头并测试连接，其余页签展示服务器暴露的工具（含参数文档）、提示词和资源。工具页可逐个停用工具（停用的不注入 agent）；MCP 调用是否需要审批由通用页的审批模式统一控制（`dangerous+mcp`）。保存后下一条消息生效，工具名会以 `服务器名__工具名` 前缀注入。
 
-**局域网访问**：默认只监听 `127.0.0.1`。如需手机等设备访问，在配置 toml 的 `[server]` 中设置 `host = "0.0.0.0"` 并**务必**设置 `auth_token`，访问时带 `?token=你的令牌` 或 `Authorization: Bearer` 头。
+**局域网访问**：默认只监听 `127.0.0.1`。如需手机等设备访问，在配置 toml 的 `[server]` 中设置 `host = "0.0.0.0"`。当前版本没有鉴权，请只在可信局域网内开放。
 
 ## 目录结构
 
 业务功能模块内部分层：`router.py` 路由定义与 response 组装、`service.py` 业务逻辑、`template.py` 出入参 pydantic 模型、`model.py`（可选）SQLAlchemy ORM 表结构。
 
 ```
-main.py              服务主程序：lifespan、挂载 router/middleware/handler、健康检查、静态文件
+main.py              服务主程序：lifespan、挂载 router/handler、健康检查、静态文件
 src/
   sessions/          会话：增删改查、消息、审批恢复、SSE 附着（含 agent.py 组装
                      create_deep_agent、serialize.py 消息序列化；model.py=sessions 表）
@@ -72,7 +72,8 @@ src/
   utils/
     database.py        SQLAlchemy 声明基类（业务表；checkpoint 由 langgraph 自管）
     resource_loader.py 配置加载 + 单例资源池（引擎/会话工厂、checkpointer、运行注册表）
-    app_config.py      logging、lifespan、auth middleware、exception handler
+    app_config.py      logging、lifespan、exception handler、统一 JSON 响应、
+                       服务级业务状态码（三段式规则说明 + 模块级码表在各 router.py）
 public/
   index.html         完整前端（无构建步骤）
 test/
@@ -89,7 +90,7 @@ workspaces/          自动创建的会话工作目录
 - 没有沙箱。审批模式是唯一防线，不建议在生产机器上使用 `off` 模式。
 - 注意 prompt injection：agent 读取的文件内容、MCP 工具返回的内容都可能诱导模型执行恶意命令，审批时请看清命令内容再批准。
 - API key 存在本地 `data/app.db`（`data/` 已加入 `.gitignore`），不要把数据目录提交到公开仓库。
-- 不要在未设置 `AUTH_TOKEN` 的情况下把服务暴露到公网。
+- 当前版本没有鉴权，不要把服务暴露到公网。
 
 ## 常见问题
 

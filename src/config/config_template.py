@@ -17,8 +17,6 @@ ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 class ServerConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 3080
-    # 局域网访问时务必设置；请求需带 ?token= 或 Authorization: Bearer
-    auth_token: str | None = None
     # API 上下文根（如 "/api"），默认不配置；各业务模块前缀拼在其后
     context_root: str = ""
 

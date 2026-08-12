@@ -1,15 +1,27 @@
-"""FastAPI 主程序的横切配置：logging、lifespan、middleware、exception handler、
+"""FastAPI 主程序的横切配置：logging、lifespan、exception handler、
 统一响应格式。只定义函数，由 main.py 统一挂载。
 
-响应最外层统一为三个字段（http 状态码与 statusCode 一致）：
-  { statusCode: 业务状态码, message: 消息说明, data: dict | list | null }
+响应最外层统一为三个字段：
+  { statusCode: 三段式业务状态码, message: 消息说明, data: dict | list | null }
+
+业务状态码为三段式字符串 xx-yy-zz：
+  xx  服务名缩写，本服务为 WA（web-agent）；
+  yy  功能模块，00 为服务级（健康检查、全局 exception handler），
+      业务模块从 01 起递增（与 main.py 的 router 挂载顺序一致）；
+  zz  状态序号，00 表示成功；99 表示 500 未知错误（仅服务级有），
+      其余错误从 01 起递增。
+
+服务级状态码与文案映射表定义在本文件（ServiceCode / MESSAGES），
+模块级的在各模块 router.py 中同样成对定义。每个状态码都有对应文案；
+需要携带动态细节的调用点在文案后追加冒号说明（如具体目录、校验失败原因）。
 """
 
 import contextlib
 import logging
+from enum import StrEnum
 
 import aiosqlite
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -32,14 +44,29 @@ def setup_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 
-def api_ok(data=None, message: str = "ok") -> JSONResponse:
-    """统一成功响应。"""
-    return JSONResponse({"statusCode": 200, "message": message, "data": data})
+class ServiceCode(StrEnum):
+    """服务级业务状态码（WA-00-zz）；模块级的见各模块 router.py。"""
+
+    OK = "WA-00-00"
+    VALIDATION_ERROR = "WA-00-01"
+    CONFLICT = "WA-00-02"
+    UNKNOWN_ERROR = "WA-00-99"
 
 
-def json_error(message: str, status: int = 400) -> JSONResponse:
-    """统一错误响应。"""
-    return JSONResponse({"statusCode": status, "message": message, "data": None}, status_code=status)
+MESSAGES: dict[ServiceCode, str] = {
+    ServiceCode.OK: "成功",
+    ServiceCode.VALIDATION_ERROR: "请求参数校验失败",
+    ServiceCode.CONFLICT: "记录已存在（唯一约束冲突）",
+    ServiceCode.UNKNOWN_ERROR: "服务器内部错误",
+}
+
+
+def json_response(http_code: int, status_code: str, message: str, data=None) -> JSONResponse:
+    """统一 JSON 响应出口：body 为 {statusCode, message, data}。
+
+    http_code 传 fastapi.status 常量；status_code 是三段式业务码；
+    message 必填，常规场景取对应 MESSAGES 表，需要细节时在其后追加。"""
+    return JSONResponse({"statusCode": status_code, "message": message, "data": data}, status_code=http_code)
 
 
 def validation_error_message(e) -> str:
@@ -62,17 +89,21 @@ def validation_error_message(e) -> str:
 
 async def on_validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
     """请求校验失败的全局出口：router 内不再逐个 try/except。"""
-    return json_error(validation_error_message(exc), 422)
+    code = ServiceCode.VALIDATION_ERROR
+    return json_response(
+        status.HTTP_422_UNPROCESSABLE_CONTENT, code, f"{MESSAGES[code]}: {validation_error_message(exc)}"
+    )
 
 
 async def on_integrity_error(_request: Request, exc: IntegrityError) -> JSONResponse:
     """数据库唯一/完整性约束冲突的全局出口（如主键重名）。"""
-    return json_error("记录已存在（唯一约束冲突）", 409)
+    return json_response(status.HTTP_409_CONFLICT, ServiceCode.CONFLICT, MESSAGES[ServiceCode.CONFLICT])
 
 
 async def on_error(request: Request, exc: Exception) -> JSONResponse:
     logger.exception("API error: %s %s", request.method, request.url.path)
-    return json_error(str(exc), 500)
+    code = ServiceCode.UNKNOWN_ERROR
+    return json_response(status.HTTP_500_INTERNAL_SERVER_ERROR, code, f"{MESSAGES[code]}: {exc}")
 
 
 @contextlib.asynccontextmanager
@@ -96,23 +127,6 @@ async def lifespan(app: FastAPI):
     except RuntimeError as e:
         logger.warning("no model configured yet: %s", e)
     logger.info("workspace root: %s", CONFIG.paths.workspace_root)
-    if not CONFIG.server.auth_token and CONFIG.server.host not in ("127.0.0.1", "localhost"):
-        logger.warning("server exposed beyond localhost without auth_token")
 
     yield
     await conn.close()
-
-
-# 各业务模块 router 的一级前缀（与各 router 的 prefix 保持一致），
-# auth 中间件用它识别 API 请求
-API_PREFIXES = ("/sessions", "/providers", "/settings", "/mcp", "/skills")
-_PROTECTED_PREFIXES = tuple(f"{CONFIG.server.context_root}{p}" for p in API_PREFIXES)
-
-
-async def auth_middleware(request: Request, call_next):
-    token = CONFIG.server.auth_token
-    if token and request.url.path.startswith(_PROTECTED_PREFIXES):
-        ok = request.headers.get("authorization") == f"Bearer {token}" or request.query_params.get("token") == token
-        if not ok:
-            return json_error("unauthorized", 401)
-    return await call_next(request)
