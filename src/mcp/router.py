@@ -2,18 +2,19 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Path
+from fastapi import APIRouter, Depends, Path
+from sqlalchemy.orm import Session
 
 from src.mcp import service
 from src.mcp.template import McpTestBody, McpUpsertBody
 from src.utils.app_config import api_ok
-from src.utils.database import DB
+from src.utils.database import get_db
 
 router = APIRouter(prefix="/api")
 
 
 @router.get("/mcp")
-async def list_mcp(db: DB):
+async def list_mcp(db: Session = Depends(get_db)):
     return api_ok({"servers": service.list_mcp_servers(db)})
 
 
@@ -23,12 +24,12 @@ async def mcp_test(body: McpTestBody):
 
 
 @router.post("/mcp")
-async def upsert_mcp(body: McpUpsertBody, db: DB):
+async def upsert_mcp(body: McpUpsertBody, db: Session = Depends(get_db)):
     service.upsert_mcp_server(db, body.name, body.to_config(), body.enabled)
     return api_ok()
 
 
 @router.delete("/mcp/{name}")
-async def delete_mcp(name: Annotated[str, Path(pattern=r"^[\w-]+$")], db: DB):
+async def delete_mcp(name: Annotated[str, Path(pattern=r"^[\w-]+$")], db: Session = Depends(get_db)):
     service.delete_mcp_server(db, name)
     return api_ok()

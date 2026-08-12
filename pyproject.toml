@@ -48,10 +48,15 @@ select = [
     "PLW0603", # 禁止 global 赋值
 ]
 ignore = [
-    "RUF001", # 中文全角标点误报
+    "RUF001",  # 中文全角标点误报
     "RUF002",
     "RUF003",
+    "FAST002", # 依赖注入统一用 db: Session = Depends(get_db) 传统写法，不强制 Annotated
 ]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI 依赖注入惯用法：db: Session = Depends(get_db)
+extend-immutable-calls = ["fastapi.Depends"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"

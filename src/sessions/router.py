@@ -7,7 +7,7 @@ import re
 import uuid
 
 import anyio
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from langgraph.types import Command
 from sqlalchemy.orm import Session
@@ -17,14 +17,14 @@ from src.sessions.serialize import serialize_history, serialize_task_interrupts
 from src.sessions.service import Run, active_run, public_session, thread_config
 from src.sessions.template import CreateSessionBody, MessageBody, PatchSessionBody, ResumeBody
 from src.utils.app_config import api_ok, json_error
-from src.utils.database import DB
-from src.utils.resource_loader import CONFIG, resources
+from src.utils.database import get_db
+from src.utils.resource_loader import CONFIG
 
 router = APIRouter(prefix="/api")
 
 
 @router.get("/dirs/recent")
-async def recent_dirs(db: DB):
+async def recent_dirs(db: Session = Depends(get_db)):
     workspace_root = str(CONFIG.paths.workspace_root)
     seen = set()
     dirs = []
@@ -41,14 +41,14 @@ async def recent_dirs(db: DB):
 
 
 @router.get("/sessions")
-async def list_sessions(db: DB):
+async def list_sessions(db: Session = Depends(get_db)):
     return api_ok(
         {"sessions": [{**public_session(s), "busy": bool(active_run(s["id"]))} for s in service.list_sessions(db)]}
     )
 
 
 @router.post("/sessions")
-async def create_session(db: DB, body: CreateSessionBody | None = None):
+async def create_session(body: CreateSessionBody | None = None, db: Session = Depends(get_db)):
     body = body or CreateSessionBody()
     id = str(uuid.uuid4())
     cwd = (body.cwd or "").strip()
@@ -70,22 +70,22 @@ def _get_session(db: Session, session_id: str) -> dict | None:
 
 
 @router.delete("/sessions/{session_id}")
-async def delete_session(session_id: str, db: DB):
+async def delete_session(session_id: str, request: Request, db: Session = Depends(get_db)):
     session = _get_session(db, session_id)
     if not session:
         return json_error("session not found", 404)
     run = active_run(session["id"])
     if run:
         run.abort()
-    resources.runs.pop(session["id"], None)
+    service.runs.pop(session["id"], None)
     service.delete_session(db, session["id"])
     with contextlib.suppress(Exception):
-        await resources.checkpointer.adelete_thread(session["id"])
+        await request.app.state.checkpointer.adelete_thread(session["id"])
     return api_ok()
 
 
 @router.patch("/sessions/{session_id}")
-async def patch_session(session_id: str, body: PatchSessionBody, db: DB):
+async def patch_session(session_id: str, body: PatchSessionBody, db: Session = Depends(get_db)):
     session = _get_session(db, session_id)
     if not session:
         return json_error("session not found", 404)
@@ -93,13 +93,13 @@ async def patch_session(session_id: str, body: PatchSessionBody, db: DB):
 
 
 @router.get("/sessions/{session_id}/history")
-async def session_history(session_id: str, db: DB):
+async def session_history(session_id: str, request: Request, db: Session = Depends(get_db)):
     session = _get_session(db, session_id)
     if not session:
         return json_error("session not found", 404)
-    agent, _mcp_errors = await service.get_session_agent(db, session)
+    agent, _mcp_errors = await service.get_session_agent(db, request.app.state.checkpointer, session)
     state = await agent.aget_state(thread_config(session["id"]))
-    run = resources.runs.get(session["id"])
+    run = service.runs.get(session["id"])
     busy = bool(run and not run.done)
     return api_ok(
         {
@@ -117,7 +117,7 @@ async def session_history(session_id: str, db: DB):
 
 
 @router.post("/sessions/{session_id}/messages")
-async def post_message(session_id: str, body: MessageBody, db: DB):
+async def post_message(session_id: str, body: MessageBody, request: Request, db: Session = Depends(get_db)):
     session = _get_session(db, session_id)
     if not session:
         return json_error("session not found", 404)
@@ -127,31 +127,33 @@ async def post_message(session_id: str, body: MessageBody, db: DB):
     if session["title"] == "New session":
         service.touch_session(db, session["id"], content[:40])
         session["title"] = content[:40]
-    await service.start_run(db, session, {"messages": [{"role": "user", "content": content}]}, content)
+    checkpointer = request.app.state.checkpointer
+    await service.start_run(db, checkpointer, session, {"messages": [{"role": "user", "content": content}]}, content)
     return api_ok()
 
 
 @router.post("/sessions/{session_id}/resume")
-async def post_resume(session_id: str, body: ResumeBody, db: DB):
+async def post_resume(session_id: str, body: ResumeBody, request: Request, db: Session = Depends(get_db)):
     session = _get_session(db, session_id)
     if not session:
         return json_error("session not found", 404)
     if active_run(session["id"]):
         return json_error("session busy", 409)
-    await service.start_run(db, session, Command(resume={"decisions": body.decisions}))
+    checkpointer = request.app.state.checkpointer
+    await service.start_run(db, checkpointer, session, Command(resume={"decisions": body.decisions}))
     return api_ok()
 
 
 @router.get("/sessions/{session_id}/stream")
-async def session_stream(session_id: str, db: DB):
+async def session_stream(session_id: str, db: Session = Depends(get_db)):
     session = _get_session(db, session_id)
     if not session:
         return json_error("session not found", 404)
-    return _stream_attach_response(resources.runs.get(session["id"]))
+    return _stream_attach_response(service.runs.get(session["id"]))
 
 
 @router.post("/sessions/{session_id}/stop")
-async def post_stop(session_id: str, db: DB):
+async def post_stop(session_id: str, db: Session = Depends(get_db)):
     session = _get_session(db, session_id)
     if not session:
         return json_error("session not found", 404)

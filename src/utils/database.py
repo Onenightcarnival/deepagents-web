@@ -9,9 +9,7 @@ LangGraph checkpoint 数据是独立的库（checkpoints-py.db），由 langgrap
 """
 
 from collections.abc import Generator
-from typing import Annotated
 
-from fastapi import Depends
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -30,10 +28,6 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
 def get_db() -> Generator[Session, None, None]:
-    """FastAPI 依赖：每个请求一个业务库会话。"""
+    """FastAPI 依赖：每个请求一个业务库会话（db: Session = Depends(get_db)）。"""
     with SessionLocal() as session:
         yield session
-
-
-# router 入参的依赖注入别名：db: DB
-DB = Annotated[Session, Depends(get_db)]

@@ -23,7 +23,7 @@ from src.providers.service import resolve_model
 from src.sessions.model import SessionRecord  # noqa: F401
 from src.settings.model import SettingRecord  # noqa: F401
 from src.utils.database import Base, SessionLocal, engine
-from src.utils.resource_loader import CONFIG, ENV, resources
+from src.utils.resource_loader import CONFIG, ENV
 
 logger = logging.getLogger("deepagent-web")
 
@@ -76,7 +76,7 @@ async def on_error(request: Request, exc: Exception) -> JSONResponse:
 
 
 @contextlib.asynccontextmanager
-async def lifespan(_app: FastAPI):
+async def lifespan(app: FastAPI):
     # 业务库：建表（无迁移逻辑，表结构变更直接删除 data 目录重建）+ WAL
     Base.metadata.create_all(engine)
     with engine.connect() as conn:
@@ -84,8 +84,8 @@ async def lifespan(_app: FastAPI):
 
     # checkpoint 库：LangGraph 对话状态，独立于业务库
     conn = await aiosqlite.connect(str(CONFIG.paths.data_dir / "checkpoints-py.db"))
-    resources.checkpointer = AsyncSqliteSaver(conn)
-    await resources.checkpointer.setup()
+    app.state.checkpointer = AsyncSqliteSaver(conn)
+    await app.state.checkpointer.setup()
 
     logger.info("env: %s", ENV)
     logger.info("listening on http://%s:%s", CONFIG.server.host, CONFIG.server.port)

@@ -2,20 +2,21 @@
 
 import contextlib
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
 from src.providers.service import model_exists, resolve_model
 from src.settings import service
 from src.settings.template import ProjectConfigBody, ProjectParams, SettingsBody
 from src.utils.app_config import api_ok, json_error
-from src.utils.database import DB
+from src.utils.database import get_db
 from src.utils.resource_loader import CONFIG
 
 router = APIRouter(prefix="/api")
 
 
 @router.get("/config")
-async def get_config(db: DB):
+async def get_config(db: Session = Depends(get_db)):
     default_model = None
     with contextlib.suppress(RuntimeError):
         m = resolve_model(db, None)
@@ -31,7 +32,7 @@ async def get_config(db: DB):
 
 
 @router.post("/settings")
-async def post_settings(body: SettingsBody, db: DB):
+async def post_settings(body: SettingsBody, db: Session = Depends(get_db)):
     if body.approval_mode:
         service.set_setting(db, "approvalMode", body.approval_mode)
     if "default_model" in body.model_fields_set:
@@ -44,7 +45,7 @@ async def post_settings(body: SettingsBody, db: DB):
 
 
 @router.post("/project-config")
-async def post_project_config(body: ProjectConfigBody, db: DB):
+async def post_project_config(body: ProjectConfigBody, db: Session = Depends(get_db)):
     has_model = "model" in body.model_fields_set
     if has_model and body.model and not model_exists(db, body.model.provider, body.model.model):
         return json_error("unknown provider/model")

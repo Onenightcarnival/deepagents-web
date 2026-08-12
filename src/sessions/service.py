@@ -22,7 +22,7 @@ from src.sessions.serialize import content_to_text, serialize_history, serialize
 from src.settings.service import get_setting
 from src.skills.service import expand_path, get_skill_dirs
 from src.utils.database import SessionLocal
-from src.utils.resource_loader import CONFIG, resources
+from src.utils.resource_loader import CONFIG
 
 
 def _now_ms() -> int:
@@ -116,8 +116,12 @@ class Run:
             self.task.cancel()
 
 
+# sessionId -> 最近一次运行记录（保留到被下一次运行替换），运行与页面连接解耦
+runs: dict[str, Run] = {}
+
+
 def active_run(session_id: str) -> Run | None:
-    run = resources.runs.get(session_id)
+    run = runs.get(session_id)
     return run if run and not run.done else None
 
 
@@ -133,11 +137,11 @@ def thread_config(session_id: str) -> dict:
     return {"configurable": {"thread_id": session_id}}
 
 
-async def get_session_agent(db: Session, session: dict):
+async def get_session_agent(db: Session, checkpointer, session: dict):
     project_key = project_key_for(session)
     return await build_agent(
         cwd=session["cwd"],
-        checkpointer=resources.checkpointer,
+        checkpointer=checkpointer,
         mcp_servers=list_mcp_servers(db),
         approval_mode=get_setting(db, "approvalMode", "dangerous"),
         model=resolve_model(db, project_key),
@@ -146,7 +150,7 @@ async def get_session_agent(db: Session, session: dict):
     )
 
 
-async def start_run(db: Session, session: dict, input, user_text: str | None = None) -> Run:
+async def start_run(db: Session, checkpointer, session: dict, input, user_text: str | None = None) -> Run:
     """启动一次运行。agent 构建完成后即返回（构建失败表现为普通 HTTP
     错误），流式循环在后台继续。`user_text` 是触发运行的用户消息（审批
     恢复时为 None），进入缓冲区供重连客户端重建完整运行。"""
@@ -154,10 +158,10 @@ async def start_run(db: Session, session: dict, input, user_text: str | None = N
 
     # Reserve the busy slot before the (slow) agent build so concurrent
     # POSTs can't start a second run for the same session.
-    prev = resources.runs.get(session["id"])
-    resources.runs[session["id"]] = run
+    prev = runs.get(session["id"])
+    runs[session["id"]] = run
     try:
-        agent, mcp_errors = await get_session_agent(db, session)
+        agent, mcp_errors = await get_session_agent(db, checkpointer, session)
         state = await agent.aget_state(thread_config(session["id"]))
         run.cutoff = len(serialize_history((state.values or {}).get("messages")))
         if user_text is not None:
@@ -166,9 +170,9 @@ async def start_run(db: Session, session: dict, input, user_text: str | None = N
             run.push({"type": "warning", "message": f"MCP: {err}"})
     except BaseException:
         if prev:
-            resources.runs[session["id"]] = prev
+            runs[session["id"]] = prev
         else:
-            resources.runs.pop(session["id"], None)
+            runs.pop(session["id"], None)
         raise
 
     async def loop():
