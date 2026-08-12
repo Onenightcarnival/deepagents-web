@@ -628,7 +628,7 @@ const state = {
   liveAssistant: null,
   streamAbort: null,     // AbortController of the current /stream subscription
   skipUserEvent: false,  // sender tab already rendered its own user message
-  config: null,        // /api/config
+  config: null,        // GET /settings
   providers: [],       // working copy in settings UI
   providersDirty: false,
   selectedProvider: 0,
@@ -637,7 +637,7 @@ const state = {
   selectedMcp: null,   // name of the server shown in the detail panel
   mcpDraft: null,      // unsaved new-server config, or null
   mcpTab: "general",   // general | tools | prompts | resources
-  mcpInspect: {},      // per-server capability cache from /api/mcp/test
+  mcpInspect: {},      // per-server capability cache from /mcp/test
   collapsed: new Set(JSON.parse(localStorage.getItem("collapsedGroups") || "[]")),
 };
 
@@ -677,8 +677,10 @@ function relTime(ts) {
 function baseName(p) { return p.replace(/\/+$/, "").split("/").pop() || p; }
 function shortPath(p) { return p.replace(/^\/(Users|home)\/[^/]+/, "~"); }
 function scrollBottom() { $("chat").scrollTop = $("chat").scrollHeight; }
+// API 上下文根，与 src/config/{env}.toml 的 server.context_root 保持一致（默认不配置）
+const CTX = "";
 async function api(path, opts = {}) {
-  const res = await fetch(path, {
+  const res = await fetch(CTX + path, {
     headers: { "Content-Type": "application/json" },
     ...opts,
     body: opts.body ? JSON.stringify(opts.body) : undefined,
@@ -941,7 +943,7 @@ async function attachStream({ skipUser = false, statusText } = {}) {
   state.liveAssistant = null;
   state.skipUserEvent = skipUser;
   try {
-    const res = await fetch(`/api/sessions/${sess.id}/stream`, { signal: ctrl.signal });
+    const res = await fetch(`${CTX}/sessions/${sess.id}/stream`, { signal: ctrl.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     await consumeSSE(res);
     if (state.streamAbort === ctrl) {
@@ -975,10 +977,10 @@ function sendMessage() {
   autoGrow();
   $("chat-inner").querySelector("#empty-hint")?.remove();
   addUserMsg(text);
-  startRunRequest(`/api/sessions/${state.current.id}/messages`, { content: text }, { skipUser: true });
+  startRunRequest(`/sessions/${state.current.id}/messages`, { content: text }, { skipUser: true });
 }
 function resumeRun(decisions) {
-  startRunRequest(`/api/sessions/${state.current.id}/resume`, { decisions }, { statusText: "执行已审批的操作…" });
+  startRunRequest(`/sessions/${state.current.id}/resume`, { decisions }, { statusText: "执行已审批的操作…" });
 }
 
 // ------------------------------------------------------------ sidebar: grouped sessions
@@ -986,7 +988,7 @@ function saveCollapsed() {
   localStorage.setItem("collapsedGroups", JSON.stringify([...state.collapsed]));
 }
 async function loadSessions() {
-  const { sessions } = await api("/api/sessions");
+  const { sessions } = await api("/sessions/");
   state.sessions = sessions;
   renderSessions();
 }
@@ -1042,7 +1044,7 @@ function renderGroup(key, list) {
     standalone ? "新建独立会话" : "在此项目新建会话"}</div></div>`;
   add.onclick = async () => {
     try {
-      const { session } = await api("/api/sessions", {
+      const { session } = await api("/sessions/", {
         method: "POST", body: { cwd: standalone ? "" : key },
       });
       await loadSessions();
@@ -1087,7 +1089,7 @@ function renderSessionItem(s) {
       return;
     }
     try {
-      await api(`/api/sessions/${s.id}`, { method: "DELETE" });
+      await api(`/sessions/${s.id}`, { method: "DELETE" });
     } catch (err) {
       addWarnBanner("删除会话失败: " + err.message);
       return;
@@ -1113,7 +1115,7 @@ async function selectSession(s) {
   renderTodos([]);
   renderSessions();
   try {
-    const h = await api(`/api/sessions/${s.id}/history`);
+    const h = await api(`/sessions/${s.id}/history`);
     if (state.current?.id !== s.id) return; // 加载期间切走了
     state.current = { ...s, ...h.session };
     setTopbar();
@@ -1157,7 +1159,7 @@ async function openNewSessionModal() {
   const box = $("recent-dirs");
   box.innerHTML = "";
   try {
-    const { dirs } = await api("/api/dirs/recent");
+    const { dirs } = await api("/sessions/dirs/recent");
     if (dirs.length) {
       const label = document.createElement("div");
       label.className = "hint";
@@ -1180,7 +1182,7 @@ async function openNewSessionModal() {
 async function createSessionFromModal() {
   const cwd = $("new-cwd").value.trim();
   try {
-    const { session } = await api("/api/sessions", { method: "POST", body: { cwd } });
+    const { session } = await api("/sessions/", { method: "POST", body: { cwd } });
     $("new-session-backdrop").classList.remove("visible");
     await loadSessions();
     selectSession(session);
@@ -1198,7 +1200,7 @@ function openRename(s) {
 async function doRename() {
   const title = $("rename-input").value.trim();
   if (!title || !renameTarget) return;
-  await api(`/api/sessions/${renameTarget.id}`, { method: "PATCH", body: { title } });
+  await api(`/sessions/${renameTarget.id}`, { method: "PATCH", body: { title } });
   $("rename-backdrop").classList.remove("visible");
   if (state.current?.id === renameTarget.id) { state.current.title = title; setTopbar(); }
   loadSessions();
@@ -1229,7 +1231,7 @@ async function saveProjectConfig(patch) {
   const key = currentProjectKey();
   if (!key) return;
   try {
-    const res = await api("/api/project-config", { method: "POST", body: { key, ...patch } });
+    const res = await api("/settings/project-config", { method: "POST", body: { key, ...patch } });
     state.config.projectConfig ??= {};
     state.config.projectConfig[key] = res.config;
   } catch (e) { alert("保存失败: " + e.message); }
@@ -1240,7 +1242,7 @@ async function renderModelMenu() {
   const menu = $("model-menu");
   const key = currentProjectKey();
   if (!key) { menu.innerHTML = ""; return; }
-  const { providers } = await api("/api/providers");
+  const { providers } = await api("/providers/");
   const entry = projectEntry(key);
   const own = entry.model ?? null;
   const params = entry.params ?? {};
@@ -1347,7 +1349,7 @@ async function renderModelMenu() {
 // ------------------------------------------------------------ skills chip
 async function loadSkills() {
   try {
-    state.skills = await api("/api/skills");
+    state.skills = await api("/skills/");
   } catch { state.skills = { dirs: [], skills: [] }; }
   const n = state.skills.skills.length;
   $("skills-chip").childNodes[0].textContent = `⚡ ${n} 技能`;
@@ -1374,7 +1376,7 @@ function closeSettings() {
 
 // ------------------------------------------------------------ settings: providers
 async function loadProvidersPane() {
-  const { providers } = await api("/api/providers");
+  const { providers } = await api("/providers/");
   state.providers = structuredClone(providers);
   state.providers.forEach((p) => { p._orig = p.name; }); // 服务端主键，重命名时定位记录
   state.providersDirty = false;
@@ -1402,7 +1404,7 @@ function renderProviders() {
         // 已保存的服务商：开关即保存
         try {
           await saveProvider(p);
-          state.config = await api("/api/config");
+          state.config = await api("/settings/");
           renderModelChip();
         } catch (err) {
           p.enabled = !p.enabled;
@@ -1496,7 +1498,7 @@ function renderProviderDetail() {
     if (!p.baseUrl || !p.apiKey || !model) { r.style.color = "var(--red)"; r.textContent = "需要 API 地址、密钥和至少一个模型"; return; }
     r.style.color = "var(--text-dim)"; r.textContent = "检测中…";
     try {
-      const res = await api("/api/providers/test", { method: "POST", body: { baseUrl: p.baseUrl, apiKey: p.apiKey, model } });
+      const res = await api("/providers/test", { method: "POST", body: { baseUrl: p.baseUrl, apiKey: p.apiKey, model } });
       if (res.ok) { r.style.color = "var(--green)"; r.textContent = `✓ 连接正常（${model}，${res.latencyMs}ms）`; }
       else { r.style.color = "var(--red)"; r.textContent = `✗ ${res.error}`; }
     } catch (e) { r.style.color = "var(--red)"; r.textContent = `✗ ${e.message}`; }
@@ -1515,13 +1517,13 @@ function renderProviderDetail() {
   box.querySelector("#pv-del").onclick = async () => {
     if (!confirm(`删除服务商「${p.name}」？`)) return;
     if (p._orig) {
-      try { await api(`/api/providers/${encodeURIComponent(p._orig)}`, { method: "DELETE" }); }
+      try { await api(`/providers/${encodeURIComponent(p._orig)}`, { method: "DELETE" }); }
       catch (e) { alert("删除失败: " + e.message); return; }
     }
     state.providers.splice(state.selectedProvider, 1);
     state.selectedProvider = 0;
     state.providersDirty = false;
-    state.config = await api("/api/config");
+    state.config = await api("/settings/");
     renderModelChip();
     renderProviders();
   };
@@ -1529,7 +1531,7 @@ function renderProviderDetail() {
     try {
       await saveProvider(p);
       state.providersDirty = false;
-      state.config = await api("/api/config");
+      state.config = await api("/settings/");
       renderModelChip();
       renderProviders();
     } catch (e) { alert("保存失败: " + e.message); }
@@ -1538,8 +1540,8 @@ function renderProviderDetail() {
 // 单条保存：新建 POST（重名 409），已有 PUT（按服务端主键 _orig 定位，改名即重命名）
 async function saveProvider(p) {
   const { _orig, ...body } = p;
-  if (_orig) await api(`/api/providers/${encodeURIComponent(_orig)}`, { method: "PUT", body });
-  else await api("/api/providers", { method: "POST", body });
+  if (_orig) await api(`/providers/${encodeURIComponent(_orig)}`, { method: "PUT", body });
+  else await api("/providers/", { method: "POST", body });
   p._orig = p.name;
 }
 
@@ -1547,7 +1549,7 @@ async function saveProvider(p) {
 const MCP_TABS = [["general", "通用"], ["tools", "工具"], ["prompts", "提示词"], ["resources", "资源"]];
 async function renderMcpPane() {
   state.mcpInspect ??= {};   // per-server {ok, tools, prompts, resources} cache
-  const { servers } = await api("/api/mcp");
+  const { servers } = await api("/mcp/");
   state.mcpServers = servers;
   state.mcpTab ??= "general";
   if (!state.mcpDraft && !servers.find((s) => s.name === state.selectedMcp))
@@ -1567,7 +1569,7 @@ async function renderMcpPane() {
     item.querySelector(".toggle").onclick = async (e) => {
       e.stopPropagation();
       const { name, enabled, ...config } = s;
-      await api("/api/mcp", { method: "POST", body: { name, enabled: !enabled, ...config } });
+      await api("/mcp/", { method: "POST", body: { name, enabled: !enabled, ...config } });
       renderMcpPane();
     };
     list.appendChild(item);
@@ -1643,7 +1645,7 @@ function renderMcpGeneral(body, server, isNew) {
   body.querySelector("#btn-mcp-test").onclick = async () => {
     status.style.color = "var(--text-dim)"; status.textContent = "连接中…";
     try {
-      const res = await api("/api/mcp/test", { method: "POST", body: cfg() });
+      const res = await api("/mcp/test", { method: "POST", body: cfg() });
       if (res.ok) {
         status.style.color = "var(--green)";
         status.textContent = `✓ ${res.tools.length} 个工具 · ${res.prompts.length} 个提示词 · ${res.resources.length} 个资源`;
@@ -1655,7 +1657,7 @@ function renderMcpGeneral(body, server, isNew) {
     if (!c.name || !/^[\w-]+$/.test(c.name)) { alert("名称只能包含字母、数字、- 和 _"); return; }
     if (!c.url) { alert("URL 不能为空"); return; }
     try {
-      await api("/api/mcp", { method: "POST", body: { ...c, enabled: isNew ? true : server.enabled } });
+      await api("/mcp/", { method: "POST", body: { ...c, enabled: isNew ? true : server.enabled } });
       delete state.mcpInspect[c.name];
       state.mcpDraft = null; state.selectedMcp = c.name;
       renderMcpPane();
@@ -1666,7 +1668,7 @@ function renderMcpGeneral(body, server, isNew) {
   } else {
     body.querySelector("#btn-mcp-del").onclick = async () => {
       if (!confirm(`删除 MCP 服务器「${server.name}」？`)) return;
-      await api(`/api/mcp/${server.name}`, { method: "DELETE" });
+      await api(`/mcp/${server.name}`, { method: "DELETE" });
       delete state.mcpInspect[server.name];
       state.selectedMcp = null;
       renderMcpPane();
@@ -1678,7 +1680,7 @@ async function renderMcpCapability(body, server, tab) {
   if (!cached) {
     body.innerHTML = '<div class="hint" style="color:var(--text-dim)">连接中…</div>';
     let res;
-    try { res = await api("/api/mcp/test", { method: "POST", body: server }); }
+    try { res = await api("/mcp/test", { method: "POST", body: server }); }
     catch (e) { res = { ok: false, error: e.message }; }
     state.mcpInspect[server.name] = res;
     // re-render only if the user is still on this server (any capability tab reads the same cache)
@@ -1811,7 +1813,7 @@ function renderToolDocs(box, tools, server) {
       server.disabledTools = [...set];
       const { name, enabled, ...config } = server;
       try {
-        await api("/api/mcp", { method: "POST", body: { name, enabled, ...config } });
+        await api("/mcp/", { method: "POST", body: { name, enabled, ...config } });
       } catch (err) { alert(err.message); }
       renderMcpDetail();
     };
@@ -1830,7 +1832,7 @@ function renderSkillsPane() {
       <button class="ghost small" title="移除">✕</button>`;
     row.querySelector("button").onclick = async () => {
       const dirs = state.skills.dirs.filter((_, j) => j !== i);
-      await api("/api/skills/dirs", { method: "POST", body: { dirs } });
+      await api("/skills/dirs", { method: "POST", body: { dirs } });
       loadSkills();
     };
     dirList.appendChild(row);
@@ -1846,7 +1848,7 @@ function renderSkillsPane() {
       <button class="small">查看 SKILL.md</button>`;
     card.querySelector("button").onclick = async () => {
       try {
-        const { content } = await api(`/api/skills/file?path=${encodeURIComponent(sk.path)}`);
+        const { content } = await api(`/skills/file?path=${encodeURIComponent(sk.path)}`);
         $("skillmd-title").textContent = shortPath(sk.path);
         $("skillmd-view").textContent = content;
         $("skillmd-backdrop").classList.add("visible");
@@ -1879,7 +1881,7 @@ function renderGeneralPane() {
     card.innerHTML = `<span class="r-dot"></span>
       <div><div class="r-title">${esc(m.t)}</div><div class="r-desc">${esc(m.d)}</div></div>`;
     card.onclick = async () => {
-      await api("/api/settings", { method: "POST", body: { approvalMode: m.v } });
+      await api("/settings/", { method: "POST", body: { approvalMode: m.v } });
       state.config.approvalMode = m.v;
       renderGeneralPane();
     };
@@ -1900,7 +1902,7 @@ $("input").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
 $("btn-send").onclick = sendMessage;
-$("btn-stop").onclick = () => state.current && api(`/api/sessions/${state.current.id}/stop`, { method: "POST" });
+$("btn-stop").onclick = () => state.current && api(`/sessions/${state.current.id}/stop`, { method: "POST" });
 $("btn-new").onclick = openNewSessionModal;
 $("btn-ns-cancel").onclick = () => $("new-session-backdrop").classList.remove("visible");
 $("btn-ns-create").onclick = createSessionFromModal;
@@ -1943,7 +1945,7 @@ $("btn-dir-cancel").onclick = () => {
 $("btn-dir-ok").onclick = async () => {
   const v = $("dir-input").value.trim();
   if (!v) { $("dir-input").focus(); return; }
-  await api("/api/skills/dirs", { method: "POST", body: { dirs: [...state.skills.dirs, v] } });
+  await api("/skills/dirs", { method: "POST", body: { dirs: [...state.skills.dirs, v] } });
   $("btn-dir-cancel").onclick();
   loadSkills();
 };
@@ -1955,7 +1957,7 @@ for (const bid of ["new-session-backdrop", "rename-backdrop", "skillmd-backdrop"
 // ------------------------------------------------------------ init
 (async function init() {
   try {
-    state.config = await api("/api/config");
+    state.config = await api("/settings/");
     await Promise.all([loadSessions(), loadSkills()]);
     setTopbar();
     if (state.sessions.length) selectSession(state.sessions[0]);

@@ -12,10 +12,10 @@ from src.utils.app_config import api_ok, json_error
 from src.utils.database import get_db, get_db_with_commit
 from src.utils.resource_loader import CONFIG
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/settings")
 
 
-@router.get("/config")
+@router.get("/")
 async def get_config(db: Session = Depends(get_db)):
     default_model = None
     with contextlib.suppress(RuntimeError):
@@ -31,7 +31,7 @@ async def get_config(db: Session = Depends(get_db)):
     )
 
 
-@router.post("/settings")
+@router.post("/")
 async def post_settings(body: SettingsBody, db: Session = Depends(get_db_with_commit)):
     if body.approval_mode:
         service.set_setting(db, "approvalMode", body.approval_mode)

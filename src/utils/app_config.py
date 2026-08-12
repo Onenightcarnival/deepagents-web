@@ -103,9 +103,15 @@ async def lifespan(app: FastAPI):
     await conn.close()
 
 
+# 各业务模块 router 的一级前缀（与各 router 的 prefix 保持一致），
+# auth 中间件用它识别 API 请求
+API_PREFIXES = ("/sessions", "/providers", "/settings", "/mcp", "/skills")
+_PROTECTED_PREFIXES = tuple(f"{CONFIG.server.context_root}{p}" for p in API_PREFIXES)
+
+
 async def auth_middleware(request: Request, call_next):
     token = CONFIG.server.auth_token
-    if token and request.url.path.startswith("/api/"):
+    if token and request.url.path.startswith(_PROTECTED_PREFIXES):
         ok = request.headers.get("authorization") == f"Bearer {token}" or request.query_params.get("token") == token
         if not ok:
             return json_error("unauthorized", 401)

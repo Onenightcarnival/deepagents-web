@@ -8,7 +8,7 @@
 
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 # 项目根目录（src/config/ 的上两级）
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -19,6 +19,14 @@ class ServerConfig(BaseModel):
     port: int = 3080
     # 局域网访问时务必设置；请求需带 ?token= 或 Authorization: Bearer
     auth_token: str | None = None
+    # API 上下文根（如 "/api"），默认不配置；各业务模块前缀拼在其后
+    context_root: str = ""
+
+    @field_validator("context_root")
+    @classmethod
+    def _normalize_context_root(cls, v):
+        v = (v or "").strip().strip("/")
+        return f"/{v}" if v else ""
 
 
 class PathsConfig(BaseModel):

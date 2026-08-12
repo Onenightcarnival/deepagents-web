@@ -20,7 +20,7 @@ from src.utils.app_config import api_ok, json_error
 from src.utils.database import get_db, get_db_with_commit
 from src.utils.resource_loader import CONFIG
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/sessions")
 
 
 @router.get("/dirs/recent")
@@ -40,14 +40,14 @@ async def recent_dirs(db: Session = Depends(get_db)):
     return api_ok({"dirs": dirs})
 
 
-@router.get("/sessions")
+@router.get("/")
 async def list_sessions(db: Session = Depends(get_db)):
     return api_ok(
         {"sessions": [{**public_session(s), "busy": bool(active_run(s["id"]))} for s in service.list_sessions(db)]}
     )
 
 
-@router.post("/sessions")
+@router.post("/")
 async def create_session(body: CreateSessionBody | None = None, db: Session = Depends(get_db_with_commit)):
     body = body or CreateSessionBody()
     id = str(uuid.uuid4())
@@ -69,7 +69,7 @@ def _get_session(db: Session, session_id: str) -> dict | None:
     return service.get_session(db, session_id)
 
 
-@router.delete("/sessions/{session_id}")
+@router.delete("/{session_id}")
 async def delete_session(session_id: str, request: Request, db: Session = Depends(get_db_with_commit)):
     session = _get_session(db, session_id)
     if not session:
@@ -84,7 +84,7 @@ async def delete_session(session_id: str, request: Request, db: Session = Depend
     return api_ok()
 
 
-@router.patch("/sessions/{session_id}")
+@router.patch("/{session_id}")
 async def patch_session(session_id: str, body: PatchSessionBody, db: Session = Depends(get_db_with_commit)):
     session = _get_session(db, session_id)
     if not session:
@@ -92,7 +92,7 @@ async def patch_session(session_id: str, body: PatchSessionBody, db: Session = D
     return api_ok({"session": public_session(service.update_session(db, session["id"], title=body.title))})
 
 
-@router.get("/sessions/{session_id}/history")
+@router.get("/{session_id}/history")
 async def session_history(session_id: str, request: Request, db: Session = Depends(get_db)):
     session = _get_session(db, session_id)
     if not session:
@@ -116,7 +116,7 @@ async def session_history(session_id: str, request: Request, db: Session = Depen
     )
 
 
-@router.post("/sessions/{session_id}/messages")
+@router.post("/{session_id}/messages")
 async def post_message(session_id: str, body: MessageBody, request: Request, db: Session = Depends(get_db_with_commit)):
     session = _get_session(db, session_id)
     if not session:
@@ -132,7 +132,7 @@ async def post_message(session_id: str, body: MessageBody, request: Request, db:
     return api_ok()
 
 
-@router.post("/sessions/{session_id}/resume")
+@router.post("/{session_id}/resume")
 async def post_resume(session_id: str, body: ResumeBody, request: Request, db: Session = Depends(get_db)):
     session = _get_session(db, session_id)
     if not session:
@@ -144,7 +144,7 @@ async def post_resume(session_id: str, body: ResumeBody, request: Request, db: S
     return api_ok()
 
 
-@router.get("/sessions/{session_id}/stream")
+@router.get("/{session_id}/stream")
 async def session_stream(session_id: str, db: Session = Depends(get_db)):
     session = _get_session(db, session_id)
     if not session:
@@ -152,7 +152,7 @@ async def session_stream(session_id: str, db: Session = Depends(get_db)):
     return _stream_attach_response(service.runs.get(session["id"]))
 
 
-@router.post("/sessions/{session_id}/stop")
+@router.post("/{session_id}/stop")
 async def post_stop(session_id: str, db: Session = Depends(get_db)):
     session = _get_session(db, session_id)
     if not session:

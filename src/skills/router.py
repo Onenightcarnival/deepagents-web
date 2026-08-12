@@ -9,23 +9,23 @@ from src.skills.template import SkillDirsBody
 from src.utils.app_config import api_ok, json_error
 from src.utils.database import get_db, get_db_with_commit
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/skills")
 
 
-@router.get("/skills")
+@router.get("/")
 async def list_skills(db: Session = Depends(get_db)):
     dirs = service.get_skill_dirs(db)
     result = service.scan_skills(dirs)
     return api_ok({"dirs": dirs, "skills": result["skills"], "errors": result["errors"]})
 
 
-@router.post("/skills/dirs")
+@router.post("/dirs")
 async def save_skill_dirs(body: SkillDirsBody, db: Session = Depends(get_db_with_commit)):
     set_setting(db, "skillDirs", body.dirs)
     return api_ok()
 
 
-@router.get("/skills/file")
+@router.get("/file")
 async def get_skill_file(path: str | None = None, db: Session = Depends(get_db)):
     if not path:
         return json_error("path required")

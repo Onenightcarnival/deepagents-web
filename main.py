@@ -34,11 +34,9 @@ app.exception_handler(Exception)(on_error)
 app.exception_handler(RequestValidationError)(on_validation_error)
 app.exception_handler(IntegrityError)(on_integrity_error)
 
-app.include_router(sessions_router)
-app.include_router(providers_router)
-app.include_router(settings_router)
-app.include_router(mcp_router)
-app.include_router(skills_router)
+# 各模块 router 前缀与模块名一致，统一拼在上下文根之后（默认不配置）
+for module_router in (sessions_router, providers_router, settings_router, mcp_router, skills_router):
+    app.include_router(module_router, prefix=CONFIG.server.context_root)
 
 
 @app.get("/healthz")
