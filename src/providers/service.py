@@ -18,11 +18,11 @@ import time
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from src.providers.model import ProviderRecord
 from src.providers.template import ProviderBody
 from src.settings.service import get_setting
-from src.utils.resource_loader import resources
 
 
 def _public(r: ProviderRecord) -> dict:
@@ -49,43 +49,39 @@ def _apply(row: ProviderRecord, body: ProviderBody) -> None:
     row.type = body.type
 
 
-def get_providers() -> list[dict]:
-    with resources.db_session() as s:
-        return [_public(r) for r in s.scalars(select(ProviderRecord)).all()]
+def get_providers(db: Session) -> list[dict]:
+    return [_public(r) for r in db.scalars(select(ProviderRecord)).all()]
 
 
-def create_provider(body: ProviderBody) -> None:
-    """新增服务商。重名由主键约束拦截（IntegrityError 由调用方处理）。"""
-    with resources.db_session() as s:
-        row = ProviderRecord(name=body.name)
-        _apply(row, body)
-        s.add(row)
-        s.commit()
+def create_provider(db: Session, body: ProviderBody) -> None:
+    """新增服务商。重名由主键约束拦截（IntegrityError 走全局 handler）。"""
+    row = ProviderRecord(name=body.name)
+    _apply(row, body)
+    db.add(row)
+    db.commit()
 
 
-def update_provider(name: str, body: ProviderBody) -> bool:
+def update_provider(db: Session, name: str, body: ProviderBody) -> bool:
     """更新服务商（body.name 与 name 不同即重命名）。不存在返回 False；
     重命名撞到已有名称由主键约束拦截。"""
-    with resources.db_session() as s:
-        row = s.get(ProviderRecord, name)
-        if row is None:
-            return False
-        _apply(row, body)
-        s.commit()
+    row = db.get(ProviderRecord, name)
+    if row is None:
+        return False
+    _apply(row, body)
+    db.commit()
     return True
 
 
-def delete_provider(name: str) -> None:
-    with resources.db_session() as s:
-        row = s.get(ProviderRecord, name)
-        if row:
-            s.delete(row)
-            s.commit()
+def delete_provider(db: Session, name: str) -> None:
+    row = db.get(ProviderRecord, name)
+    if row:
+        db.delete(row)
+        db.commit()
 
 
-def model_exists(provider: str, model: str) -> bool:
+def model_exists(db: Session, provider: str, model: str) -> bool:
     """启用的服务商下是否存在该模型。"""
-    p = next((x for x in get_providers() if x.get("enabled") and x["name"] == provider), None)
+    p = next((x for x in get_providers(db) if x.get("enabled") and x["name"] == provider), None)
     return bool(p and model in (p.get("models") or []))
 
 
@@ -97,23 +93,23 @@ def provider_type_of(p: dict | None) -> str:
     return "deepseek" if re.search(r"deepseek", p.get("baseUrl") or "", re.I) else "openai"
 
 
-def resolve_model(project_key: str | None = None) -> dict:
+def resolve_model(db: Session, project_key: str | None = None) -> dict:
     """解析一个项目（工作目录）应使用的具体模型。
 
     Returns {provider, model, baseUrl, apiKey, type}.
     """
-    providers = [p for p in get_providers() if p.get("enabled")]
+    providers = [p for p in get_providers(db) if p.get("enabled")]
 
     def by_name(name):
         return next((p for p in providers if p["name"] == name), None)
 
     candidates = []
     if project_key:
-        pc = get_setting("projectConfig", {})
+        pc = get_setting(db, "projectConfig", {})
         entry = pc.get(project_key) or {}
         if entry.get("model"):
             candidates.append(entry["model"])
-    default = get_setting("defaultModel")
+    default = get_setting(db, "defaultModel")
     if default:
         candidates.append(default)
     if providers:
@@ -139,9 +135,9 @@ def resolve_model(project_key: str | None = None) -> dict:
     raise RuntimeError("没有可用的模型：请在设置 → 模型服务中配置服务商")
 
 
-def resolve_params(project_key: str | None) -> dict:
+def resolve_params(db: Session, project_key: str | None) -> dict:
     """解析项目的生成参数。None 字段表示未覆盖——跟随模型/服务商默认值。"""
-    pc = get_setting("projectConfig", {})
+    pc = get_setting(db, "projectConfig", {})
     p = (pc.get(project_key) or {}).get("params") or {} if project_key else {}
     return {
         "thinking": p.get("thinking") if p.get("thinking") in ("on", "off") else None,

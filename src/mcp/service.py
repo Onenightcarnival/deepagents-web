@@ -12,9 +12,9 @@ import json
 import httpx
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from src.mcp.model import McpServerRecord
-from src.utils.resource_loader import resources
 
 # 工具列表缓存，按配置哈希失效；仅原地更新
 _cache: dict = {"hash": None, "tools": {}}
@@ -23,24 +23,21 @@ _cache: dict = {"hash": None, "tools": {}}
 # ---------------------------------------------------------------- 配置 CRUD
 
 
-def list_mcp_servers() -> list[dict]:
-    with resources.db_session() as s:
-        rows = s.scalars(select(McpServerRecord).order_by(McpServerRecord.name)).all()
+def list_mcp_servers(db: Session) -> list[dict]:
+    rows = db.scalars(select(McpServerRecord).order_by(McpServerRecord.name)).all()
     return [{"name": r.name, "enabled": bool(r.enabled), **json.loads(r.config)} for r in rows]
 
 
-def upsert_mcp_server(name: str, config: dict, enabled: bool = True) -> None:
-    with resources.db_session() as s:
-        s.merge(McpServerRecord(name=name, config=json.dumps(config), enabled=1 if enabled else 0))
-        s.commit()
+def upsert_mcp_server(db: Session, name: str, config: dict, enabled: bool = True) -> None:
+    db.merge(McpServerRecord(name=name, config=json.dumps(config), enabled=1 if enabled else 0))
+    db.commit()
 
 
-def delete_mcp_server(name: str) -> None:
-    with resources.db_session() as s:
-        row = s.get(McpServerRecord, name)
-        if row:
-            s.delete(row)
-            s.commit()
+def delete_mcp_server(db: Session, name: str) -> None:
+    row = db.get(McpServerRecord, name)
+    if row:
+        db.delete(row)
+        db.commit()
 
 
 # ---------------------------------------------------------------- 工具加载

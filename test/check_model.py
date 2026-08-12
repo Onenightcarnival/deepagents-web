@@ -9,11 +9,13 @@ from langchain_core.tools import tool
 
 from src.providers.service import resolve_model
 from src.sessions.agent import build_model
+from src.utils.database import SessionLocal
 
 
 def main() -> None:
     try:
-        resolved = resolve_model(None)
+        with SessionLocal() as db:
+            resolved = resolve_model(db, None)
     except RuntimeError as e:
         print(e)
         print("请先启动服务，在网页设置 → 模型服务中添加服务商。")

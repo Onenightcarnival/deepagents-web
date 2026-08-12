@@ -10,23 +10,25 @@ import anyio
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from langgraph.types import Command
+from sqlalchemy.orm import Session
 
 from src.sessions import service
 from src.sessions.serialize import serialize_history, serialize_task_interrupts
 from src.sessions.service import Run, active_run, public_session, thread_config
 from src.sessions.template import CreateSessionBody, MessageBody, PatchSessionBody, ResumeBody
-from src.utils.app_config import json_error
+from src.utils.app_config import api_ok, json_error
+from src.utils.database import DB
 from src.utils.resource_loader import CONFIG, resources
 
 router = APIRouter(prefix="/api")
 
 
 @router.get("/dirs/recent")
-async def recent_dirs():
+async def recent_dirs(db: DB):
     workspace_root = str(CONFIG.paths.workspace_root)
     seen = set()
     dirs = []
-    for s in service.list_sessions():
+    for s in service.list_sessions(db):
         if s["cwd"].startswith(workspace_root):
             continue  # 自动创建的 workspace 是噪音
         if s["cwd"] in seen:
@@ -35,16 +37,18 @@ async def recent_dirs():
         dirs.append(s["cwd"])
         if len(dirs) >= 8:
             break
-    return {"dirs": dirs}
+    return api_ok({"dirs": dirs})
 
 
 @router.get("/sessions")
-async def list_sessions():
-    return {"sessions": [{**public_session(s), "busy": bool(active_run(s["id"]))} for s in service.list_sessions()]}
+async def list_sessions(db: DB):
+    return api_ok(
+        {"sessions": [{**public_session(s), "busy": bool(active_run(s["id"]))} for s in service.list_sessions(db)]}
+    )
 
 
 @router.post("/sessions")
-async def create_session(body: CreateSessionBody | None = None):
+async def create_session(db: DB, body: CreateSessionBody | None = None):
     body = body or CreateSessionBody()
     id = str(uuid.uuid4())
     cwd = (body.cwd or "").strip()
@@ -55,104 +59,106 @@ async def create_session(body: CreateSessionBody | None = None):
     else:
         cwd = str(CONFIG.paths.workspace_root / id[:8])
         await anyio.Path(cwd).mkdir(parents=True, exist_ok=True)
-    session = service.create_session(id, (body.title or "").strip() or "New session", cwd)
-    return {"session": public_session(session)}
+    session = service.create_session(db, id, (body.title or "").strip() or "New session", cwd)
+    return api_ok({"session": public_session(session)})
 
 
-def _get_session(session_id: str) -> dict | None:
+def _get_session(db: Session, session_id: str) -> dict | None:
     if not re.fullmatch(r"[0-9a-f-]{36}", session_id):
         return None
-    return service.get_session(session_id)
+    return service.get_session(db, session_id)
 
 
 @router.delete("/sessions/{session_id}")
-async def delete_session(session_id: str):
-    session = _get_session(session_id)
+async def delete_session(session_id: str, db: DB):
+    session = _get_session(db, session_id)
     if not session:
         return json_error("session not found", 404)
     run = active_run(session["id"])
     if run:
         run.abort()
     resources.runs.pop(session["id"], None)
-    service.delete_session(session["id"])
+    service.delete_session(db, session["id"])
     with contextlib.suppress(Exception):
         await resources.checkpointer.adelete_thread(session["id"])
-    return {"ok": True}
+    return api_ok()
 
 
 @router.patch("/sessions/{session_id}")
-async def patch_session(session_id: str, body: PatchSessionBody):
-    session = _get_session(session_id)
+async def patch_session(session_id: str, body: PatchSessionBody, db: DB):
+    session = _get_session(db, session_id)
     if not session:
         return json_error("session not found", 404)
-    return {"session": public_session(service.update_session(session["id"], title=body.title))}
+    return api_ok({"session": public_session(service.update_session(db, session["id"], title=body.title))})
 
 
 @router.get("/sessions/{session_id}/history")
-async def session_history(session_id: str):
-    session = _get_session(session_id)
+async def session_history(session_id: str, db: DB):
+    session = _get_session(db, session_id)
     if not session:
         return json_error("session not found", 404)
-    agent, _mcp_errors = await service.get_session_agent(session)
+    agent, _mcp_errors = await service.get_session_agent(db, session)
     state = await agent.aget_state(thread_config(session["id"]))
     run = resources.runs.get(session["id"])
     busy = bool(run and not run.done)
-    return {
-        "session": public_session(session),
-        "busy": busy,
-        # 运行中回合在 messages 里的起点——客户端渲染到此为止，其余由
-        # /stream 回放重建
-        "runCutoff": run.cutoff if busy else None,
-        "lastRun": {"status": run.status, "error": run.error} if run and run.done else None,
-        "messages": serialize_history((state.values or {}).get("messages")),
-        "todos": (state.values or {}).get("todos") or [],
-        "interrupts": serialize_task_interrupts(state.tasks),
-    }
+    return api_ok(
+        {
+            "session": public_session(session),
+            "busy": busy,
+            # 运行中回合在 messages 里的起点——客户端渲染到此为止，其余由
+            # /stream 回放重建
+            "runCutoff": run.cutoff if busy else None,
+            "lastRun": {"status": run.status, "error": run.error} if run and run.done else None,
+            "messages": serialize_history((state.values or {}).get("messages")),
+            "todos": (state.values or {}).get("todos") or [],
+            "interrupts": serialize_task_interrupts(state.tasks),
+        }
+    )
 
 
 @router.post("/sessions/{session_id}/messages")
-async def post_message(session_id: str, body: MessageBody):
-    session = _get_session(session_id)
+async def post_message(session_id: str, body: MessageBody, db: DB):
+    session = _get_session(db, session_id)
     if not session:
         return json_error("session not found", 404)
     if active_run(session["id"]):
         return json_error("session busy", 409)
     content = body.content
     if session["title"] == "New session":
-        service.touch_session(session["id"], content[:40])
+        service.touch_session(db, session["id"], content[:40])
         session["title"] = content[:40]
-    await service.start_run(session, {"messages": [{"role": "user", "content": content}]}, content)
-    return {"ok": True}
+    await service.start_run(db, session, {"messages": [{"role": "user", "content": content}]}, content)
+    return api_ok()
 
 
 @router.post("/sessions/{session_id}/resume")
-async def post_resume(session_id: str, body: ResumeBody):
-    session = _get_session(session_id)
+async def post_resume(session_id: str, body: ResumeBody, db: DB):
+    session = _get_session(db, session_id)
     if not session:
         return json_error("session not found", 404)
     if active_run(session["id"]):
         return json_error("session busy", 409)
-    await service.start_run(session, Command(resume={"decisions": body.decisions}))
-    return {"ok": True}
+    await service.start_run(db, session, Command(resume={"decisions": body.decisions}))
+    return api_ok()
 
 
 @router.get("/sessions/{session_id}/stream")
-async def session_stream(session_id: str):
-    session = _get_session(session_id)
+async def session_stream(session_id: str, db: DB):
+    session = _get_session(db, session_id)
     if not session:
         return json_error("session not found", 404)
     return _stream_attach_response(resources.runs.get(session["id"]))
 
 
 @router.post("/sessions/{session_id}/stop")
-async def post_stop(session_id: str):
-    session = _get_session(session_id)
+async def post_stop(session_id: str, db: DB):
+    session = _get_session(db, session_id)
     if not session:
         return json_error("session not found", 404)
     run = active_run(session["id"])
     if run:
         run.abort()
-    return {"ok": True}
+    return api_ok()
 
 
 def _stream_attach_response(run: Run | None) -> StreamingResponse:

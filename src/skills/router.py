@@ -5,29 +5,30 @@ from fastapi import APIRouter
 from src.settings.service import set_setting
 from src.skills import service
 from src.skills.template import SkillDirsBody
-from src.utils.app_config import json_error
+from src.utils.app_config import api_ok, json_error
+from src.utils.database import DB
 
 router = APIRouter(prefix="/api")
 
 
 @router.get("/skills")
-async def list_skills():
-    dirs = service.get_skill_dirs()
+async def list_skills(db: DB):
+    dirs = service.get_skill_dirs(db)
     result = service.scan_skills(dirs)
-    return {"dirs": dirs, "skills": result["skills"], "errors": result["errors"]}
+    return api_ok({"dirs": dirs, "skills": result["skills"], "errors": result["errors"]})
 
 
 @router.post("/skills/dirs")
-async def save_skill_dirs(body: SkillDirsBody):
-    set_setting("skillDirs", body.dirs)
-    return {"ok": True}
+async def save_skill_dirs(body: SkillDirsBody, db: DB):
+    set_setting(db, "skillDirs", body.dirs)
+    return api_ok()
 
 
 @router.get("/skills/file")
-async def get_skill_file(path: str | None = None):
+async def get_skill_file(db: DB, path: str | None = None):
     if not path:
         return json_error("path required")
     try:
-        return {"path": path, "content": service.read_skill_file(service.get_skill_dirs(), path)}
+        return api_ok({"path": path, "content": service.read_skill_file(service.get_skill_dirs(db), path)})
     except ValueError as e:
         return json_error(str(e))

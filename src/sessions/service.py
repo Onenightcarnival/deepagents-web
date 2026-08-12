@@ -12,6 +12,7 @@ import json
 import time
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from src.mcp.service import list_mcp_servers
 from src.providers.service import resolve_model, resolve_params
@@ -20,6 +21,7 @@ from src.sessions.model import SessionRecord
 from src.sessions.serialize import content_to_text, serialize_history, serialize_interrupt_values
 from src.settings.service import get_setting
 from src.skills.service import expand_path, get_skill_dirs
+from src.utils.database import SessionLocal
 from src.utils.resource_loader import CONFIG, resources
 
 
@@ -30,52 +32,46 @@ def _now_ms() -> int:
 # ---------------------------------------------------------------- 元数据 CRUD
 
 
-def create_session(id: str, title: str, cwd: str) -> dict:
+def create_session(db: Session, id: str, title: str, cwd: str) -> dict:
     now = _now_ms()
-    with resources.db_session() as s:
-        s.add(SessionRecord(id=id, title=title, cwd=cwd, created_at=now, updated_at=now))
-        s.commit()
-    return get_session(id)
+    db.add(SessionRecord(id=id, title=title, cwd=cwd, created_at=now, updated_at=now))
+    db.commit()
+    return get_session(db, id)
 
 
-def get_session(id: str) -> dict | None:
-    with resources.db_session() as s:
-        row = s.get(SessionRecord, id)
-        return row.to_dict() if row else None
+def get_session(db: Session, id: str) -> dict | None:
+    row = db.get(SessionRecord, id)
+    return row.to_dict() if row else None
 
 
-def list_sessions() -> list[dict]:
-    with resources.db_session() as s:
-        rows = s.scalars(select(SessionRecord).order_by(SessionRecord.updated_at.desc())).all()
-        return [r.to_dict() for r in rows]
+def list_sessions(db: Session) -> list[dict]:
+    rows = db.scalars(select(SessionRecord).order_by(SessionRecord.updated_at.desc())).all()
+    return [r.to_dict() for r in rows]
 
 
-def touch_session(id: str, title: str | None = None) -> None:
-    with resources.db_session() as s:
-        row = s.get(SessionRecord, id)
-        if not row:
-            return
-        row.updated_at = _now_ms()
-        if title is not None:
-            row.title = title
-        s.commit()
+def touch_session(db: Session, id: str, title: str | None = None) -> None:
+    row = db.get(SessionRecord, id)
+    if not row:
+        return
+    row.updated_at = _now_ms()
+    if title is not None:
+        row.title = title
+    db.commit()
 
 
-def delete_session(id: str) -> None:
-    with resources.db_session() as s:
-        row = s.get(SessionRecord, id)
-        if row:
-            s.delete(row)
-            s.commit()
+def delete_session(db: Session, id: str) -> None:
+    row = db.get(SessionRecord, id)
+    if row:
+        db.delete(row)
+        db.commit()
 
 
-def update_session(id: str, title: str | None = None) -> dict | None:
-    with resources.db_session() as s:
-        row = s.get(SessionRecord, id)
-        if row and title is not None:
-            row.title = title
-            s.commit()
-    return get_session(id)
+def update_session(db: Session, id: str, title: str | None = None) -> dict | None:
+    row = db.get(SessionRecord, id)
+    if row and title is not None:
+        row.title = title
+        db.commit()
+    return get_session(db, id)
 
 
 def public_session(s: dict | None) -> dict | None:
@@ -137,20 +133,20 @@ def thread_config(session_id: str) -> dict:
     return {"configurable": {"thread_id": session_id}}
 
 
-async def get_session_agent(session: dict):
+async def get_session_agent(db: Session, session: dict):
     project_key = project_key_for(session)
     return await build_agent(
         cwd=session["cwd"],
         checkpointer=resources.checkpointer,
-        mcp_servers=list_mcp_servers(),
-        approval_mode=get_setting("approvalMode", "dangerous"),
-        model=resolve_model(project_key),
-        params=resolve_params(project_key),
-        skill_dirs=[expand_path(d) for d in get_skill_dirs()],
+        mcp_servers=list_mcp_servers(db),
+        approval_mode=get_setting(db, "approvalMode", "dangerous"),
+        model=resolve_model(db, project_key),
+        params=resolve_params(db, project_key),
+        skill_dirs=[expand_path(d) for d in get_skill_dirs(db)],
     )
 
 
-async def start_run(session: dict, input, user_text: str | None = None) -> Run:
+async def start_run(db: Session, session: dict, input, user_text: str | None = None) -> Run:
     """启动一次运行。agent 构建完成后即返回（构建失败表现为普通 HTTP
     错误），流式循环在后台继续。`user_text` 是触发运行的用户消息（审批
     恢复时为 None），进入缓冲区供重连客户端重建完整运行。"""
@@ -161,7 +157,7 @@ async def start_run(session: dict, input, user_text: str | None = None) -> Run:
     prev = resources.runs.get(session["id"])
     resources.runs[session["id"]] = run
     try:
-        agent, mcp_errors = await get_session_agent(session)
+        agent, mcp_errors = await get_session_agent(db, session)
         state = await agent.aget_state(thread_config(session["id"]))
         run.cutoff = len(serialize_history((state.values or {}).get("messages")))
         if user_text is not None:
@@ -229,7 +225,9 @@ async def start_run(session: dict, input, user_text: str | None = None) -> Run:
                                         "status": getattr(m, "status", None) or "success",
                                     }
                                 )
-            touch_session(session["id"])
+            # 运行在请求结束后仍在后台继续，不能复用请求作用域的会话
+            with SessionLocal() as bg_db:
+                touch_session(bg_db, session["id"])
             run.status = "done"
             run.push({"type": "done"})
         except asyncio.CancelledError:
