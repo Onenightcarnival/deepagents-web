@@ -165,6 +165,13 @@ async function renderModelMenu() {
   };
 }
 
+export async function loadSkills() {
+  try {
+    state.skills = await api("/skills/");
+  } catch { state.skills = { dirs: [], skills: [] }; }
+  renderSkillsChip();
+}
+
 export function renderSkillsChip() {
   const n = state.skills.skills.length;
   $("skills-chip").childNodes[0].textContent = `⚡ ${n} 技能`;

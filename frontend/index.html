@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>设置（开发页）</title>
+<style>
+  body { background: #0d1117; color: #e6edf3; font-family: -apple-system, "PingFang SC", sans-serif; }
+  button { padding: 8px 16px; margin: 40px; }
+</style>
+</head>
+<body>
+<!-- 开发用挂载页：真实页面是 public/index.html，通过构建产物加载同一个应用 -->
+<button onclick="document.dispatchEvent(new CustomEvent('settings:open'))">打开设置</button>
+<div id="settings-root"></div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

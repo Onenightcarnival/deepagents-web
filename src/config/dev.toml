@@ -4,6 +4,7 @@
 [server]
 host = "127.0.0.1"      # 局域网访问改为 "0.0.0.0"
 port = 3080
+context_root = "/api"   # API 统一前缀；前端 CTX 与 Vite proxy 均按 /api 约定
 
 [paths]
 data_dir = "data"             # 相对项目根目录

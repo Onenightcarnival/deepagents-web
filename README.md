@@ -2,7 +2,7 @@
 
 自托管的 Web Agent，形态类似 Codex / Claude Code：网页界面下达任务，agent 在你的机器上读写文件、执行 shell 命令、调用 MCP 工具，危险操作需要你在界面上审批。
 
-技术栈：[deepagents](https://github.com/langchain-ai/deepagents)（agent 内核）+ FastAPI + uv（Python 运行时与包管理）+ SQLite（会话与状态持久化）+ vanilla JS 前端（原生 ES Module 分模块，无构建步骤；marked/highlight.js/DOMPurify/jsdiff 本地 vendor）。
+技术栈：[deepagents](https://github.com/langchain-ai/deepagents)（agent 内核）+ FastAPI + uv（Python 运行时与包管理）+ SQLite（会话与状态持久化）+ 前端双栈：聊天壳层为 vanilla JS（原生 ES Module，无构建步骤；marked/highlight.js/DOMPurify/jsdiff 本地 vendor），设置页为 Vue 3 + Naive UI（bun + Vite 构建，产物随 git 提交，部署机不需要 node）。
 
 ## 特性
 
@@ -31,6 +31,22 @@ uv run python -m test.check_model
 ```
 
 服务启动配置（端口、监听地址、鉴权令牌、数据目录等）在 `src/config/{env}.toml`，结构定义见 [config_template.py](src/config/config_template.py)；`dev.toml` 随仓库提交，其他环境的 toml 不提交（可存放密钥）。模型服务商、MCP、技能目录等都在网页设置页配置。
+
+## 前端开发
+
+前端分两部分：
+
+- **聊天壳层**：`public/js/`（原生 ES Module），改完刷新即生效，无构建步骤。
+- **设置页**：Vue 3 + Naive UI 应用，源码在 `frontend/`，通过 `settings:open` / `settings:changed` 两个自定义事件与壳层桥接。
+
+```bash
+cd frontend
+bun install     # 首次
+bun run dev     # Vite 开发服务器（热更新），/api 代理到本机 3080 的 dev 实例
+bun run build   # 构建到 public/assets/（固定文件名，随 git 提交）
+```
+
+改动 `frontend/` 源码后必须 `bun run build` 并提交 `public/assets/` 产物；部署机只需要 uv，不需要 bun/node。API 统一前缀 `/api`（`server.context_root`），前端 `CTX` 与 Vite proxy 均按此约定。
 
 ## 使用说明
 
@@ -75,7 +91,11 @@ src/
     app_config.py      logging、lifespan、exception handler、统一 JSON 响应、
                        服务级业务状态码（三段式规则说明 + 模块级码表在各 router.py）
 public/
-  index.html         完整前端（无构建步骤）
+  index.html         页面骨架（聊天壳层 + 设置应用挂载点）
+  css/ js/           聊天壳层（原生 ES Module，无构建步骤）
+  vendor/            本地托管的第三方库（marked/hljs/DOMPurify/jsdiff）
+  assets/            设置应用构建产物（bun run build 生成，随 git 提交）
+frontend/            设置应用源码（Vue 3 + Naive UI，bun + Vite）
 test/
   check_model.py     真实 API 自检（连通性 / tool calling / 流式）
   mock_llm.py        OpenAI 兼容 mock 模型（离线测试用）

@@ -12,3 +12,8 @@ export async function api(path, opts = {}) {
   if (!res.ok) throw new Error(body.message || `HTTP ${res.status}`);
   return body.data;
 }
+
+// 通知宿主页面（public/ 下的 vanilla 部分）配置有变，刷新模型 chip / 技能 chip
+export function notifySettingsChanged() {
+  document.dispatchEvent(new CustomEvent("settings:changed"));
+}

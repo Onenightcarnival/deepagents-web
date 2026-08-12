@@ -1,7 +1,9 @@
 .venv/
 __pycache__/
 data/
+data-e2e/
 workspaces/
+frontend/node_modules/
 src/config/*.toml
 !src/config/dev.toml
 .env
