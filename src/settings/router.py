@@ -9,7 +9,7 @@ from src.providers.service import model_exists, resolve_model
 from src.settings import service
 from src.settings.template import ProjectConfigBody, ProjectParams, SettingsBody
 from src.utils.app_config import api_ok, json_error
-from src.utils.database import get_db
+from src.utils.database import get_db, get_db_with_commit
 from src.utils.resource_loader import CONFIG
 
 router = APIRouter(prefix="/api")
@@ -32,7 +32,7 @@ async def get_config(db: Session = Depends(get_db)):
 
 
 @router.post("/settings")
-async def post_settings(body: SettingsBody, db: Session = Depends(get_db)):
+async def post_settings(body: SettingsBody, db: Session = Depends(get_db_with_commit)):
     if body.approval_mode:
         service.set_setting(db, "approvalMode", body.approval_mode)
     if "default_model" in body.model_fields_set:
@@ -45,7 +45,7 @@ async def post_settings(body: SettingsBody, db: Session = Depends(get_db)):
 
 
 @router.post("/project-config")
-async def post_project_config(body: ProjectConfigBody, db: Session = Depends(get_db)):
+async def post_project_config(body: ProjectConfigBody, db: Session = Depends(get_db_with_commit)):
     has_model = "model" in body.model_fields_set
     if has_model and body.model and not model_exists(db, body.model.provider, body.model.model):
         return json_error("unknown provider/model")

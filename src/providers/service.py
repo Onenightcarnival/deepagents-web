@@ -58,7 +58,9 @@ def create_provider(db: Session, body: ProviderBody) -> None:
     row = ProviderRecord(name=body.name)
     _apply(row, body)
     db.add(row)
-    db.commit()
+    # flush 不提交，只提前触发约束检查：teardown 的 commit 晚于响应发送，
+    # 在那里才抛 IntegrityError 就来不及改写状态码了
+    db.flush()
 
 
 def update_provider(db: Session, name: str, body: ProviderBody) -> bool:
@@ -68,7 +70,7 @@ def update_provider(db: Session, name: str, body: ProviderBody) -> bool:
     if row is None:
         return False
     _apply(row, body)
-    db.commit()
+    db.flush()  # 同 create：重命名撞主键需在请求内暴露
     return True
 
 
@@ -76,7 +78,6 @@ def delete_provider(db: Session, name: str) -> None:
     row = db.get(ProviderRecord, name)
     if row:
         db.delete(row)
-        db.commit()
 
 
 def model_exists(db: Session, provider: str, model: str) -> bool:

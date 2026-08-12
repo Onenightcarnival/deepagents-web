@@ -30,14 +30,12 @@ def list_mcp_servers(db: Session) -> list[dict]:
 
 def upsert_mcp_server(db: Session, name: str, config: dict, enabled: bool = True) -> None:
     db.merge(McpServerRecord(name=name, config=json.dumps(config), enabled=1 if enabled else 0))
-    db.commit()
 
 
 def delete_mcp_server(db: Session, name: str) -> None:
     row = db.get(McpServerRecord, name)
     if row:
         db.delete(row)
-        db.commit()
 
 
 # ---------------------------------------------------------------- 工具加载

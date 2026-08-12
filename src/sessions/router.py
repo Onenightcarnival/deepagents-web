@@ -17,7 +17,7 @@ from src.sessions.serialize import serialize_history, serialize_task_interrupts
 from src.sessions.service import Run, active_run, public_session, thread_config
 from src.sessions.template import CreateSessionBody, MessageBody, PatchSessionBody, ResumeBody
 from src.utils.app_config import api_ok, json_error
-from src.utils.database import get_db
+from src.utils.database import get_db, get_db_with_commit
 from src.utils.resource_loader import CONFIG
 
 router = APIRouter(prefix="/api")
@@ -48,7 +48,7 @@ async def list_sessions(db: Session = Depends(get_db)):
 
 
 @router.post("/sessions")
-async def create_session(body: CreateSessionBody | None = None, db: Session = Depends(get_db)):
+async def create_session(body: CreateSessionBody | None = None, db: Session = Depends(get_db_with_commit)):
     body = body or CreateSessionBody()
     id = str(uuid.uuid4())
     cwd = (body.cwd or "").strip()
@@ -70,7 +70,7 @@ def _get_session(db: Session, session_id: str) -> dict | None:
 
 
 @router.delete("/sessions/{session_id}")
-async def delete_session(session_id: str, request: Request, db: Session = Depends(get_db)):
+async def delete_session(session_id: str, request: Request, db: Session = Depends(get_db_with_commit)):
     session = _get_session(db, session_id)
     if not session:
         return json_error("session not found", 404)
@@ -85,7 +85,7 @@ async def delete_session(session_id: str, request: Request, db: Session = Depend
 
 
 @router.patch("/sessions/{session_id}")
-async def patch_session(session_id: str, body: PatchSessionBody, db: Session = Depends(get_db)):
+async def patch_session(session_id: str, body: PatchSessionBody, db: Session = Depends(get_db_with_commit)):
     session = _get_session(db, session_id)
     if not session:
         return json_error("session not found", 404)
@@ -117,7 +117,7 @@ async def session_history(session_id: str, request: Request, db: Session = Depen
 
 
 @router.post("/sessions/{session_id}/messages")
-async def post_message(session_id: str, body: MessageBody, request: Request, db: Session = Depends(get_db)):
+async def post_message(session_id: str, body: MessageBody, request: Request, db: Session = Depends(get_db_with_commit)):
     session = _get_session(db, session_id)
     if not session:
         return json_error("session not found", 404)

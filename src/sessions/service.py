@@ -35,7 +35,6 @@ def _now_ms() -> int:
 def create_session(db: Session, id: str, title: str, cwd: str) -> dict:
     now = _now_ms()
     db.add(SessionRecord(id=id, title=title, cwd=cwd, created_at=now, updated_at=now))
-    db.commit()
     return get_session(db, id)
 
 
@@ -56,21 +55,18 @@ def touch_session(db: Session, id: str, title: str | None = None) -> None:
     row.updated_at = _now_ms()
     if title is not None:
         row.title = title
-    db.commit()
 
 
 def delete_session(db: Session, id: str) -> None:
     row = db.get(SessionRecord, id)
     if row:
         db.delete(row)
-        db.commit()
 
 
 def update_session(db: Session, id: str, title: str | None = None) -> dict | None:
     row = db.get(SessionRecord, id)
     if row and title is not None:
         row.title = title
-        db.commit()
     return get_session(db, id)
 
 
@@ -232,6 +228,7 @@ async def start_run(db: Session, checkpointer, session: dict, input, user_text: 
             # 运行在请求结束后仍在后台继续，不能复用请求作用域的会话
             with SessionLocal() as bg_db:
                 touch_session(bg_db, session["id"])
+                bg_db.commit()
             run.status = "done"
             run.push({"type": "done"})
         except asyncio.CancelledError:

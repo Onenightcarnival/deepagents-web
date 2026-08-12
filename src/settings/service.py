@@ -14,7 +14,6 @@ def get_setting(db: Session, key: str, fallback=None):
 
 def set_setting(db: Session, key: str, value) -> None:
     db.merge(SettingRecord(key=key, value=json.dumps(value)))
-    db.commit()
 
 
 def update_project_config(db: Session, key: str, model, params, has_model: bool, has_params: bool) -> dict:

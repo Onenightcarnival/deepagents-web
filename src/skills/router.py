@@ -7,7 +7,7 @@ from src.settings.service import set_setting
 from src.skills import service
 from src.skills.template import SkillDirsBody
 from src.utils.app_config import api_ok, json_error
-from src.utils.database import get_db
+from src.utils.database import get_db, get_db_with_commit
 
 router = APIRouter(prefix="/api")
 
@@ -20,7 +20,7 @@ async def list_skills(db: Session = Depends(get_db)):
 
 
 @router.post("/skills/dirs")
-async def save_skill_dirs(body: SkillDirsBody, db: Session = Depends(get_db)):
+async def save_skill_dirs(body: SkillDirsBody, db: Session = Depends(get_db_with_commit)):
     set_setting(db, "skillDirs", body.dirs)
     return api_ok()
 
