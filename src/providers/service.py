@@ -1,26 +1,26 @@
-"""Model provider configuration (Cherry-Studio style).
+"""模型服务商（Cherry-Studio 式配置）。
 
-Providers live in the settings table as a JSON array:
+服务商列表存在 settings 表的 providers 键（JSON 数组）：
   [{ name, enabled, baseUrl, apiKey, models: [str], defaultModel }]
 
-Model selection and generation params both follow the *project* (a project
-is a working directory; sessions in auto-created workspaces share the
-virtual project "__standalone__"). Stored in settings.projectConfig:
+模型选择与生成参数都跟随「项目」（项目=工作目录；自动创建的 workspace
+里的会话共享虚拟项目 __standalone__），存 settings.projectConfig：
   { [projectKey]: { model: {provider, model} | null,
                     params: { thinking?, thinkingEffort?, temperature?, maxTokens? } } }
 
-Resolution order for the model used by a session:
-  projectConfig[key].model -> settings.defaultModel -> first enabled
-  provider's default model.
+会话所用模型的解析顺序：
+  projectConfig[key].model -> settings.defaultModel -> 第一个启用服务商的默认模型
 """
 import re
 import time
 
 import httpx
 
+from ..settings.service import get_setting
 
-def get_providers(db) -> list[dict]:
-    return db.get_setting("providers") or []
+
+def get_providers() -> list[dict]:
+    return get_setting("providers") or []
 
 
 def validate_providers(providers) -> str | None:
@@ -44,31 +44,30 @@ def validate_providers(providers) -> str | None:
 
 
 def provider_type_of(p: dict | None) -> str:
-    """Provider API dialect. Explicit `type` wins; otherwise inferred from the
-    base URL. Currently only "deepseek" gets special treatment (thinking mode);
-    everything else is plain "openai"-compatible."""
+    """服务商 API 方言。显式 type 优先，否则按 base URL 推断；目前只有
+    deepseek 有特殊处理（思考模式），其余按 openai 兼容处理。"""
     if p and p.get("type"):
         return p["type"]
     return "deepseek" if re.search(r"deepseek", p.get("baseUrl") or "", re.I) else "openai"
 
 
-def resolve_model(db, project_key: str | None = None) -> dict:
-    """Resolve which concrete model a project (working directory) should use.
+def resolve_model(project_key: str | None = None) -> dict:
+    """解析一个项目（工作目录）应使用的具体模型。
 
     Returns {provider, model, baseUrl, apiKey, type}.
     """
-    providers = [p for p in get_providers(db) if p.get("enabled")]
+    providers = [p for p in get_providers() if p.get("enabled")]
 
     def by_name(name):
         return next((p for p in providers if p["name"] == name), None)
 
     candidates = []
     if project_key:
-        pc = db.get_setting("projectConfig", {})
+        pc = get_setting("projectConfig", {})
         entry = pc.get(project_key) or {}
         if entry.get("model"):
             candidates.append(entry["model"])
-    default = db.get_setting("defaultModel")
+    default = get_setting("defaultModel")
     if default:
         candidates.append(default)
     if providers:
@@ -90,10 +89,9 @@ def resolve_model(db, project_key: str | None = None) -> dict:
     raise RuntimeError("没有可用的模型：请在设置 → 模型服务中配置服务商")
 
 
-def resolve_params(db, project_key: str | None) -> dict:
-    """Resolve generation params for a project. Fields left None mean
-    "not overridden — follow the model/provider default"."""
-    pc = db.get_setting("projectConfig", {})
+def resolve_params(project_key: str | None) -> dict:
+    """解析项目的生成参数。None 字段表示未覆盖——跟随模型/服务商默认值。"""
+    pc = get_setting("projectConfig", {})
     p = (pc.get(project_key) or {}).get("params") or {} if project_key else {}
     return {
         "thinking": p.get("thinking") if p.get("thinking") in ("on", "off") else None,
@@ -106,7 +104,7 @@ def resolve_params(db, project_key: str | None) -> dict:
 
 
 async def test_provider(base_url: str, api_key: str, model: str) -> dict:
-    """Quick connectivity + basic-completion test against an OpenAI-compatible API."""
+    """对 OpenAI 兼容 API 做连通性 + 基本补全测试。"""
     started = time.monotonic()
 
     def latency():

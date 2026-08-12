@@ -9,18 +9,14 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from langgraph.types import Command
+from pydantic import ValidationError
 
-from ..services.runs import (
-    Run,
-    active_run,
-    get_session_agent,
-    public_session,
-    start_run,
-    thread_config,
-)
-from ..services.serialize import serialize_history, serialize_task_interrupts
-from ..utils.app_config import json_error
+from ..utils.app_config import json_error, validation_error_message
 from ..utils.resource_loader import CONFIG, resources
+from . import service
+from .serialize import serialize_history, serialize_task_interrupts
+from .service import Run, active_run, public_session, thread_config
+from .template import CreateSessionBody, MessageBody, PatchSessionBody, ResumeBody
 
 router = APIRouter(prefix="/api")
 
@@ -30,9 +26,9 @@ async def recent_dirs():
     workspace_root = str(CONFIG.paths.workspace_root)
     seen = set()
     dirs = []
-    for s in resources.db.list_sessions():
+    for s in service.list_sessions():
         if s["cwd"].startswith(workspace_root):
-            continue  # auto-created workspaces are noise
+            continue  # 自动创建的 workspace 是噪音
         if s["cwd"] in seen:
             continue
         seen.add(s["cwd"])
@@ -47,7 +43,7 @@ async def list_sessions():
     return {
         "sessions": [
             {**public_session(s), "busy": bool(active_run(s["id"]))}
-            for s in resources.db.list_sessions()
+            for s in service.list_sessions()
         ]
     }
 
@@ -55,11 +51,11 @@ async def list_sessions():
 @router.post("/sessions")
 async def create_session(request: Request):
     try:
-        body = await request.json()
-    except Exception:
-        body = {}
+        body = CreateSessionBody.model_validate(await request.json())
+    except (ValidationError, ValueError):
+        body = CreateSessionBody()
     id = str(uuid.uuid4())
-    cwd = (body.get("cwd") or "").strip()
+    cwd = (body.cwd or "").strip()
     if cwd:
         cwd = str(Path(cwd).expanduser().resolve())
         if not Path(cwd).exists():
@@ -67,16 +63,14 @@ async def create_session(request: Request):
     else:
         cwd = str(CONFIG.paths.workspace_root / id[:8])
         Path(cwd).mkdir(parents=True, exist_ok=True)
-    session = resources.db.create_session(
-        id, (body.get("title") or "").strip() or "New session", cwd
-    )
+    session = service.create_session(id, (body.title or "").strip() or "New session", cwd)
     return {"session": public_session(session)}
 
 
 def _get_session(session_id: str) -> dict | None:
     if not re.fullmatch(r"[0-9a-f-]{36}", session_id):
         return None
-    return resources.db.get_session(session_id)
+    return service.get_session(session_id)
 
 
 @router.delete("/sessions/{session_id}")
@@ -88,7 +82,7 @@ async def delete_session(session_id: str):
     if run:
         run.abort()
     resources.runs.pop(session["id"], None)
-    resources.db.delete_session(session["id"])
+    service.delete_session(session["id"])
     with contextlib.suppress(Exception):
         await resources.checkpointer.adelete_thread(session["id"])
     return {"ok": True}
@@ -99,14 +93,11 @@ async def patch_session(session_id: str, request: Request):
     session = _get_session(session_id)
     if not session:
         return json_error("session not found", 404)
-    body = await request.json()
-    title = None
-    if "title" in body:
-        title = str(body["title"]).strip()
-        if not title:
-            return json_error("title cannot be empty")
-        title = title[:80]
-    return {"session": public_session(resources.db.update_session(session["id"], title=title))}
+    try:
+        body = PatchSessionBody.model_validate(await request.json())
+    except ValidationError as e:
+        return json_error(validation_error_message(e))
+    return {"session": public_session(service.update_session(session["id"], title=body.title))}
 
 
 @router.get("/sessions/{session_id}/history")
@@ -114,15 +105,15 @@ async def session_history(session_id: str):
     session = _get_session(session_id)
     if not session:
         return json_error("session not found", 404)
-    agent, _mcp_errors = await get_session_agent(session)
+    agent, _mcp_errors = await service.get_session_agent(session)
     state = await agent.aget_state(thread_config(session["id"]))
     run = resources.runs.get(session["id"])
     busy = bool(run and not run.done)
     return {
         "session": public_session(session),
         "busy": busy,
-        # where the running turn starts in `messages` — the client renders
-        # history up to here and reconstructs the rest from /stream replay
+        # 运行中回合在 messages 里的起点——客户端渲染到此为止，其余由
+        # /stream 回放重建
         "runCutoff": run.cutoff if busy else None,
         "lastRun": {"status": run.status, "error": run.error} if run and run.done else None,
         "messages": serialize_history((state.values or {}).get("messages")),
@@ -138,14 +129,15 @@ async def post_message(session_id: str, request: Request):
         return json_error("session not found", 404)
     if active_run(session["id"]):
         return json_error("session busy", 409)
-    body = await request.json()
-    content = str(body.get("content") or "").strip()
-    if not content:
-        return json_error("empty message")
+    try:
+        body = MessageBody.model_validate(await request.json())
+    except ValidationError as e:
+        return json_error(validation_error_message(e))
+    content = body.content
     if session["title"] == "New session":
-        resources.db.touch_session(session["id"], content[:40])
+        service.touch_session(session["id"], content[:40])
         session["title"] = content[:40]
-    await start_run(session, {"messages": [{"role": "user", "content": content}]}, content)
+    await service.start_run(session, {"messages": [{"role": "user", "content": content}]}, content)
     return {"ok": True}
 
 
@@ -156,11 +148,11 @@ async def post_resume(session_id: str, request: Request):
         return json_error("session not found", 404)
     if active_run(session["id"]):
         return json_error("session busy", 409)
-    body = await request.json()
-    decisions = body.get("decisions")
-    if not isinstance(decisions, list) or not decisions:
+    try:
+        body = ResumeBody.model_validate(await request.json())
+    except ValidationError:
         return json_error("decisions required")
-    await start_run(session, Command(resume={"decisions": decisions}))
+    await service.start_run(session, Command(resume={"decisions": body.decisions}))
     return {"ok": True}
 
 
@@ -192,15 +184,15 @@ def _stream_attach_response(run: Run | None) -> StreamingResponse:
 
     async def gen():
         if run is None:
-            # no run on record — client should rely on /history
+            # 无运行记录——客户端应依赖 /history
             yield sse({"type": "done", "idle": True})
             return
         if run.done:
             for ev in run.events:
                 yield sse(ev)
             return
-        # Subscribe before replaying: push() only happens on this event loop,
-        # so nothing can slip between subscribing and snapshotting the buffer.
+        # 先订阅再回放：push() 只发生在本事件循环上，订阅与快照之间没有
+        # await，不会漏事件
         q: asyncio.Queue = asyncio.Queue()
         run.subscribers.add(q)
         snapshot = list(run.events)

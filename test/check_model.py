@@ -6,16 +6,13 @@ import sys
 
 from langchain_core.tools import tool
 
-from src.services.agent import build_model
-from src.services.db import AppDb
-from src.services.providers import resolve_model
-from src.utils.resource_loader import CONFIG
+from src.providers.service import resolve_model
+from src.sessions.agent import build_model
 
 
 def main() -> None:
-    db = AppDb(str(CONFIG.paths.data_dir / "app.db"))
     try:
-        resolved = resolve_model(db, None)
+        resolved = resolve_model(None)
     except RuntimeError as e:
         print(e)
         print("请先启动服务，在网页设置 → 模型服务中添加服务商。")
@@ -51,7 +48,7 @@ def main() -> None:
     n = sum(1 for _ in model.stream([{"role": "user", "content": "从1数到5"}]))
     print(f"通过（{n} 个 chunk）")
 
-    print("\n全部通过，可以运行 uv run python -m src.main 启动服务。")
+    print("\n全部通过，可以运行 uv run python main.py 启动服务。")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""会话运行管理：agent 组装入口 + 运行注册表 + SSE 事件缓冲/订阅。
+"""会话业务逻辑：元数据 CRUD（SQLAlchemy）+ 运行管理。
 
 一次运行（新消息或审批恢复）以 asyncio.Task 形式执行，与任何 HTTP 连接
 解耦：关闭页面只是取消订阅，绝不中断运行（中断走 stop）。已结束的运行
@@ -8,12 +8,89 @@
 import asyncio
 import contextlib
 import json
+import time
 
+from sqlalchemy import select
+
+from ..mcp.service import list_mcp_servers
+from ..providers.service import resolve_model, resolve_params
+from ..settings.service import get_setting
+from ..skills.service import expand_path, get_skill_dirs
 from ..utils.resource_loader import CONFIG, resources
 from .agent import build_agent
-from .providers import resolve_model, resolve_params
+from .model import SessionRecord
 from .serialize import content_to_text, serialize_history, serialize_interrupt_values
-from .skills import expand_path, get_skill_dirs
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+# ---------------------------------------------------------------- 元数据 CRUD
+
+
+def create_session(id: str, title: str, cwd: str) -> dict:
+    now = _now_ms()
+    with resources.db_session() as s:
+        s.add(SessionRecord(id=id, title=title, cwd=cwd, created_at=now, updated_at=now))
+        s.commit()
+    return get_session(id)
+
+
+def get_session(id: str) -> dict | None:
+    with resources.db_session() as s:
+        row = s.get(SessionRecord, id)
+        return row.to_dict() if row else None
+
+
+def list_sessions() -> list[dict]:
+    with resources.db_session() as s:
+        rows = s.scalars(
+            select(SessionRecord).order_by(SessionRecord.updated_at.desc())
+        ).all()
+        return [r.to_dict() for r in rows]
+
+
+def touch_session(id: str, title: str | None = None) -> None:
+    with resources.db_session() as s:
+        row = s.get(SessionRecord, id)
+        if not row:
+            return
+        row.updated_at = _now_ms()
+        if title is not None:
+            row.title = title
+        s.commit()
+
+
+def delete_session(id: str) -> None:
+    with resources.db_session() as s:
+        row = s.get(SessionRecord, id)
+        if row:
+            s.delete(row)
+            s.commit()
+
+
+def update_session(id: str, title: str | None = None) -> dict | None:
+    with resources.db_session() as s:
+        row = s.get(SessionRecord, id)
+        if row and title is not None:
+            row.title = title
+            s.commit()
+    return get_session(id)
+
+
+def public_session(s: dict | None) -> dict | None:
+    """sessions 的 model 列是 JSON TEXT——对外暴露解析后的对象。"""
+    if not s:
+        return s
+    model = None
+    if s.get("model"):
+        with contextlib.suppress(Exception):
+            model = json.loads(s["model"])
+    return {**s, "model": model}
+
+
+# ---------------------------------------------------------------- 运行管理
 
 
 class Run:
@@ -57,32 +134,20 @@ def project_key_for(session: dict) -> str:
     return session["cwd"]
 
 
-def public_session(s: dict | None) -> dict | None:
-    """sessions 的 model 列是 JSON TEXT——对外暴露解析后的对象。"""
-    if not s:
-        return s
-    model = None
-    if s.get("model"):
-        with contextlib.suppress(Exception):
-            model = json.loads(s["model"])
-    return {**s, "model": model}
-
-
 def thread_config(session_id: str) -> dict:
     return {"configurable": {"thread_id": session_id}}
 
 
 async def get_session_agent(session: dict):
-    db = resources.db
     project_key = project_key_for(session)
     return await build_agent(
         cwd=session["cwd"],
         checkpointer=resources.checkpointer,
-        mcp_servers=db.list_mcp_servers(),
-        approval_mode=db.get_setting("approvalMode", "dangerous"),
-        model=resolve_model(db, project_key),
-        params=resolve_params(db, project_key),
-        skill_dirs=[expand_path(d) for d in get_skill_dirs(db)],
+        mcp_servers=list_mcp_servers(),
+        approval_mode=get_setting("approvalMode", "dangerous"),
+        model=resolve_model(project_key),
+        params=resolve_params(project_key),
+        skill_dirs=[expand_path(d) for d in get_skill_dirs()],
     )
 
 
@@ -160,7 +225,7 @@ async def start_run(session: dict, input, user_text: str | None = None) -> Run:
                                     "text": content_to_text(m.content)[:20000],
                                     "status": getattr(m, "status", None) or "success",
                                 })
-            resources.db.touch_session(session["id"])
+            touch_session(session["id"])
             run.status = "done"
             run.push({"type": "done"})
         except asyncio.CancelledError:

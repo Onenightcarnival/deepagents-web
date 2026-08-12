@@ -1,21 +1,51 @@
-"""MCP server integration via langchain-mcp-adapters.
+"""MCP 服务器：配置 CRUD + 工具加载（langchain-mcp-adapters）。
 
-Converts the user's configured MCP servers into LangChain tools that get
-passed straight into create_deep_agent. Loaded tools are cached and only
-refetched when the enabled server set changes (config hash). The Python
-adapter opens a fresh MCP session per tool call, so there is no persistent
-client to close.
+配置的 MCP 服务器转换为 LangChain 工具后直接传入 create_deep_agent。
+工具列表按配置哈希缓存，仅在启用集变化时重新拉取；Python adapter 每次
+工具调用新开 MCP 会话，无常驻连接需要关闭。
 
-Tool names are prefixed `server__tool` (matching the JS version and the
-`disabledTools` convention stored in the app db).
+工具名统一加 `服务器名__工具名` 前缀（与前端及 disabledTools 约定一致）。
 """
 import json
 
 import httpx
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from sqlalchemy import select
 
-# 工具列表缓存，按配置哈希失效；仅原地更新，见 get_mcp_tools
+from ..utils.resource_loader import resources
+from .model import McpServerRecord
+
+# 工具列表缓存，按配置哈希失效；仅原地更新
 _cache: dict = {"hash": None, "tools": {}}
+
+
+# ---------------------------------------------------------------- 配置 CRUD
+
+
+def list_mcp_servers() -> list[dict]:
+    with resources.db_session() as s:
+        rows = s.scalars(select(McpServerRecord).order_by(McpServerRecord.name)).all()
+    return [
+        {"name": r.name, "enabled": bool(r.enabled), **json.loads(r.config)}
+        for r in rows
+    ]
+
+
+def upsert_mcp_server(name: str, config: dict, enabled: bool = True) -> None:
+    with resources.db_session() as s:
+        s.merge(McpServerRecord(name=name, config=json.dumps(config), enabled=1 if enabled else 0))
+        s.commit()
+
+
+def delete_mcp_server(name: str) -> None:
+    with resources.db_session() as s:
+        row = s.get(McpServerRecord, name)
+        if row:
+            s.delete(row)
+            s.commit()
+
+
+# ---------------------------------------------------------------- 工具加载
 
 
 def _httpx_client_factory(headers=None, timeout=None, auth=None) -> httpx.AsyncClient:
@@ -28,7 +58,7 @@ def _httpx_client_factory(headers=None, timeout=None, auth=None) -> httpx.AsyncC
 def _to_adapter_config(servers: list[dict]) -> dict:
     connections = {}
     for s in servers:
-        # Only streamable HTTP is supported; skip disabled or legacy stdio entries.
+        # 仅支持 streamable HTTP；跳过停用或遗留 stdio 条目
         if not s.get("enabled") or not s.get("url"):
             continue
         connections[s["name"]] = {
@@ -41,8 +71,8 @@ def _to_adapter_config(servers: list[dict]) -> dict:
 
 
 async def get_mcp_tools(servers: list[dict]) -> tuple[list, list[str]]:
-    """Returns (tools, errors). Per-tool disable is applied on top of the
-    cached tool list, so toggling a tool never forces a refetch."""
+    """Returns (tools, errors)。逐工具停用叠加在缓存之上，开关工具不触发
+    重新拉取。"""
     config = _to_adapter_config(servers)
     if not config:
         _cache.update(hash=None, tools={})
@@ -82,9 +112,8 @@ async def get_mcp_tools(servers: list[dict]) -> tuple[list, list[str]]:
 
 
 async def test_mcp_server(config: dict) -> dict:
-    """Test a single server config with a throwaway client and list everything
-    it exposes: tools, prompts and resources (empty arrays when the server
-    does not advertise the capability)."""
+    """用一次性客户端测试单个服务器配置，列出其暴露的全部能力：tools、
+    prompts、resources（服务器未声明的能力返回空数组）。"""
     name = config.get("name") or "test"
     connections = _to_adapter_config([{**config, "name": name, "enabled": True}])
     client = MultiServerMCPClient(connections=connections)
@@ -93,7 +122,7 @@ async def test_mcp_server(config: dict) -> dict:
             {
                 "name": t.name,
                 "description": t.description or "",
-                # JSON Schema of the tool's input (already dereferenced by the adapter)
+                # 工具入参的 JSON Schema（adapter 已解引用）
                 "schema": t.tool_call_schema if isinstance(t.tool_call_schema, dict) else (
                     t.args_schema if isinstance(t.args_schema, dict) else None
                 ),
@@ -101,7 +130,7 @@ async def test_mcp_server(config: dict) -> dict:
             for t in await client.get_tools(server_name=name)
         ]
         prompts: list = []
-        resources: list = []
+        resources_list: list = []
         async with client.session(name) as session:
             try:
                 res = await session.list_prompts()
@@ -121,13 +150,13 @@ async def test_mcp_server(config: dict) -> dict:
                 pass
             try:
                 res = await session.list_resources()
-                resources = [
+                resources_list = [
                     {"uri": str(r.uri), "name": r.name or "",
                      "description": r.description or "", "mimeType": r.mimeType or ""}
                     for r in (res.resources or [])
                 ]
             except Exception:
                 pass
-        return {"ok": True, "tools": tools, "prompts": prompts, "resources": resources}
+        return {"ok": True, "tools": tools, "prompts": prompts, "resources": resources_list}
     except Exception as e:
         return {"ok": False, "error": str(e)}

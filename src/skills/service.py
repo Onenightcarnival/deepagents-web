@@ -6,6 +6,8 @@ import os
 import re
 from pathlib import Path
 
+from ..settings.service import get_setting
+
 DEFAULT_SKILL_DIR = str(Path.home() / ".deepagent" / "skills")
 
 
@@ -13,8 +15,8 @@ def expand_path(p: str) -> str:
     return str(Path(os.path.expanduser(p)).resolve())
 
 
-def get_skill_dirs(db) -> list[str]:
-    return db.get_setting("skillDirs", [DEFAULT_SKILL_DIR])
+def get_skill_dirs() -> list[str]:
+    return get_setting("skillDirs", [DEFAULT_SKILL_DIR])
 
 
 def parse_frontmatter(md: str) -> dict:

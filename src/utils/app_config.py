@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from ..services.providers import resolve_model
+from ..providers.service import resolve_model
 from .resource_loader import CONFIG, ENV, resources
 
 logger = logging.getLogger("deepagent-web")
@@ -25,6 +25,16 @@ def json_error(message: str, status: int = 400) -> JSONResponse:
     return JSONResponse({"error": message}, status_code=status)
 
 
+def validation_error_message(e) -> str:
+    """取 pydantic ValidationError 的第一条错误，转成对前端友好的单行文案。"""
+    first = e.errors()[0]
+    msg = (first.get("msg") or "invalid request").removeprefix("Value error, ")
+    if first.get("type") == "value_error":
+        return msg  # 自定义校验消息，本身已可读
+    loc = ".".join(str(p) for p in first.get("loc") or ())
+    return f"{loc}: {msg}" if loc else msg
+
+
 @contextlib.asynccontextmanager
 async def lifespan(_app: FastAPI):
     conn = await aiosqlite.connect(str(CONFIG.paths.data_dir / "checkpoints-py.db"))
@@ -34,7 +44,7 @@ async def lifespan(_app: FastAPI):
     logger.info("env: %s", ENV)
     logger.info("listening on http://%s:%s", CONFIG.server.host, CONFIG.server.port)
     try:
-        m = resolve_model(resources.db, None)
+        m = resolve_model(None)
         logger.info("default model: %s @ %s (%s)", m["model"], m["baseUrl"], m["provider"])
     except RuntimeError as e:
         logger.warning("no model configured yet: %s", e)

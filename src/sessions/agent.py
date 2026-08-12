@@ -10,8 +10,8 @@ from langchain.agents.middleware import TodoListMiddleware
 from langchain_deepseek import ChatDeepSeek
 from langchain_openai import ChatOpenAI
 
+from ..mcp.service import get_mcp_tools
 from ..utils.resource_loader import CONFIG
-from .mcp import get_mcp_tools
 
 SYSTEM_PROMPT = """You are a capable coding and general-purpose agent running on the user's machine, similar to Codex or Claude Code.
 

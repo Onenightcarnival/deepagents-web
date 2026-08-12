@@ -23,7 +23,7 @@
 uv sync
 
 # 启动（--env 选择配置环境，默认 dev）
-uv run python -m src.main
+uv run python main.py
 # 打开 http://127.0.0.1:3080，在设置 → 模型服务中添加服务商
 
 # 自检：验证默认模型的 API 连通性和 tool calling 能力（agent 能否工作的关键）
@@ -55,28 +55,23 @@ uv run python -m test.check_model
 
 ## 目录结构
 
+业务功能模块内部分层：`router.py` 路由定义与 response 组装、`service.py` 业务逻辑、`template.py` 出入参 pydantic 模型、`model.py`（可选）SQLAlchemy ORM 表结构。
+
 ```
+main.py              服务主程序：lifespan、挂载 router/middleware/handler、健康检查、静态文件
 src/
-  main.py            服务主程序：lifespan、挂载 router/middleware/handler、健康检查、静态文件
-  routers/           HTTP 层（按功能组划分，只做校验与编排）
-    sessions.py        会话增删改查、消息、审批恢复、SSE 附着、停止、最近目录
-    providers.py       模型服务商列表/保存/连通性检测
-    settings.py        全局配置、审批模式、项目级模型与参数
-    mcp.py             MCP 服务器配置与连接测试
-    skills.py          技能目录配置、扫描、SKILL.md 查看
-  services/          业务逻辑层
-    runs.py            运行注册表 + SSE 事件缓冲/订阅（运行与页面连接解耦）
-    agent.py           create_deep_agent 组装：模型、LocalShellBackend、审批中断、MCP、技能
-    providers.py       多 provider 解析、模型/参数解析、连通性检测
-    mcp.py             MultiServerMCPClient 管理（按配置哈希缓存工具列表）
-    skills.py          技能目录扫描与 SKILL.md frontmatter 解析
-    serialize.py       LangChain 消息 -> 前端 JSON
-    db.py              应用元数据（会话列表、MCP 配置、设置）
+  sessions/          会话：增删改查、消息、审批恢复、SSE 附着（含 agent.py 组装
+                     create_deep_agent、serialize.py 消息序列化；model.py=sessions 表）
+  providers/         模型服务商：列表/保存/连通性检测、模型与参数解析
+  settings/          应用设置：全局配置、审批模式、项目级配置（model.py=settings KV 表）
+  mcp/               MCP 服务器：配置增删、连接测试、工具加载（model.py=mcp_servers 表）
+  skills/            技能：目录配置、扫描、SKILL.md 查看
   config/
     config_template.py 配置结构定义（pydantic）
     dev.toml           dev 环境配置（默认；其他环境 toml 不提交）
   utils/
-    resource_loader.py 配置加载 + 单例资源池（db、checkpointer、运行注册表）
+    database.py        SQLAlchemy 声明基类（业务表；checkpoint 由 langgraph 自管）
+    resource_loader.py 配置加载 + 单例资源池（引擎/会话工厂、checkpointer、运行注册表）
     app_config.py      logging、lifespan、auth middleware、exception handler
 public/
   index.html         完整前端（无构建步骤）
