@@ -10,7 +10,7 @@ from langchain.agents.middleware import TodoListMiddleware
 from langchain_deepseek import ChatDeepSeek
 from langchain_openai import ChatOpenAI
 
-from .config import CONFIG
+from ..utils.resource_loader import CONFIG
 from .mcp import get_mcp_tools
 
 SYSTEM_PROMPT = """You are a capable coding and general-purpose agent running on the user's machine, similar to Codex or Claude Code.
@@ -36,7 +36,7 @@ def build_model(resolved: dict, params: dict | None = None):
     kwargs: dict = {
         "model": model,
         "api_key": api_key,
-        "max_retries": CONFIG.model_max_retries,
+        "max_retries": CONFIG.agent.model_max_retries,
         # 自定义 httpx 客户端：屏蔽系统代理（trust_env）并跳过证书校验
         "http_client": httpx.Client(trust_env=False, verify=False),
         "http_async_client": httpx.AsyncClient(trust_env=False, verify=False),
@@ -101,7 +101,7 @@ async def build_agent(
         root_dir=cwd,
         virtual_mode=False,
         inherit_env=True,
-        timeout=CONFIG.shell_timeout,
+        timeout=CONFIG.agent.shell_timeout,
         max_output_bytes=200_000,
     )
 

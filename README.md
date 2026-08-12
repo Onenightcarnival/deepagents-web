@@ -22,15 +22,15 @@
 ```bash
 uv sync
 
-# 启动
-uv run python -m app.main
+# 启动（--env 选择配置环境，默认 dev）
+uv run python -m src.main
 # 打开 http://127.0.0.1:3080，在设置 → 模型服务中添加服务商
 
 # 自检：验证默认模型的 API 连通性和 tool calling 能力（agent 能否工作的关键）
 uv run python -m test.check_model
 ```
 
-服务启动配置（端口、监听地址、鉴权令牌、数据目录等）在项目根目录的 `config.toml`，可选；参考 [config.example.toml](config.example.toml)。模型服务商、MCP、技能目录等都在网页设置页配置。
+服务启动配置（端口、监听地址、鉴权令牌、数据目录等）在 `src/config/{env}.toml`，结构定义见 [config_template.py](src/config/config_template.py)；`dev.toml` 随仓库提交，其他环境的 toml 不提交（可存放密钥）。模型服务商、MCP、技能目录等都在网页设置页配置。
 
 ## 使用说明
 
@@ -51,28 +51,40 @@ uv run python -m test.check_model
 
 **MCP 服务器**（设置 → MCP 服务器）：仅支持 Streamable HTTP 传输（不依赖本机的 npx / bun / uv 环境）。左侧选择服务器，右侧分「通用 / 工具 / 提示词 / 资源」页签：通用页配置 URL 和鉴权请求头并测试连接，其余页签展示服务器暴露的工具（含参数文档）、提示词和资源。工具页可逐个停用工具（停用的不注入 agent）；MCP 调用是否需要审批由通用页的审批模式统一控制（`dangerous+mcp`）。保存后下一条消息生效，工具名会以 `服务器名__工具名` 前缀注入。
 
-**局域网访问**：默认只监听 `127.0.0.1`。如需手机等设备访问，在 `config.toml` 的 `[server]` 中设置 `host = "0.0.0.0"` 并**务必**设置 `auth_token`，访问时带 `?token=你的令牌` 或 `Authorization: Bearer` 头。
+**局域网访问**：默认只监听 `127.0.0.1`。如需手机等设备访问，在配置 toml 的 `[server]` 中设置 `host = "0.0.0.0"` 并**务必**设置 `auth_token`，访问时带 `?token=你的令牌` 或 `Authorization: Bearer` 头。
 
 ## 目录结构
 
 ```
-app/
-  main.py          FastAPI 服务：REST API + SSE 流式输出 + 静态文件
-  config.py        服务启动配置（读取根目录 config.toml）
-  agent.py         create_deep_agent 组装：模型、LocalShellBackend、审批中断、MCP 工具、技能
-  providers.py     模型服务商配置（多 provider、解析会话模型、连通性检测）
-  skills.py        技能目录扫描与 SKILL.md frontmatter 解析
-  db.py            应用元数据（会话列表、MCP 配置、设置）
-  mcp.py           MultiServerMCPClient 管理（按配置哈希缓存工具列表）
-  serialize.py     LangChain 消息 -> 前端 JSON
+src/
+  main.py            服务主程序：lifespan、挂载 router/middleware/handler、健康检查、静态文件
+  routers/           HTTP 层（按功能组划分，只做校验与编排）
+    sessions.py        会话增删改查、消息、审批恢复、SSE 附着、停止、最近目录
+    providers.py       模型服务商列表/保存/连通性检测
+    settings.py        全局配置、审批模式、项目级模型与参数
+    mcp.py             MCP 服务器配置与连接测试
+    skills.py          技能目录配置、扫描、SKILL.md 查看
+  services/          业务逻辑层
+    runs.py            运行注册表 + SSE 事件缓冲/订阅（运行与页面连接解耦）
+    agent.py           create_deep_agent 组装：模型、LocalShellBackend、审批中断、MCP、技能
+    providers.py       多 provider 解析、模型/参数解析、连通性检测
+    mcp.py             MultiServerMCPClient 管理（按配置哈希缓存工具列表）
+    skills.py          技能目录扫描与 SKILL.md frontmatter 解析
+    serialize.py       LangChain 消息 -> 前端 JSON
+    db.py              应用元数据（会话列表、MCP 配置、设置）
+  config/
+    config_template.py 配置结构定义（pydantic）
+    dev.toml           dev 环境配置（默认；其他环境 toml 不提交）
+  utils/
+    resource_loader.py 配置加载 + 单例资源池（db、checkpointer、运行注册表）
+    app_config.py      logging、lifespan、auth middleware、exception handler
 public/
-  index.html       完整前端（无构建步骤）
+  index.html         完整前端（无构建步骤）
 test/
-  check_model.py   真实 API 自检（连通性 / tool calling / 流式）
-  mock_llm.py      OpenAI 兼容 mock 模型（离线测试用）
-config.example.toml  服务启动配置示例（复制为 config.toml 使用）
-data/              SQLite 数据（app.db + checkpoints-py.db，自动创建）
-workspaces/        自动创建的会话工作目录
+  check_model.py     真实 API 自检（连通性 / tool calling / 流式）
+  mock_llm.py        OpenAI 兼容 mock 模型（离线测试用）
+data/                SQLite 数据（app.db + checkpoints-py.db，自动创建）
+workspaces/          自动创建的会话工作目录
 ```
 
 ## 安全须知

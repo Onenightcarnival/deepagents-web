@@ -1,0 +1,15 @@
+# dev 环境配置（默认环境）。所有键都可省略，缺省值见 config_template.py。
+# 其他环境：复制本文件为 prod.toml 等，用 --env prod 启动（不会被提交）。
+
+[server]
+host = "127.0.0.1"      # 局域网访问改为 "0.0.0.0"，并务必设置 auth_token
+port = 3080
+# auth_token = "change-me"
+
+[paths]
+data_dir = "data"             # 相对项目根目录
+workspace_root = "workspaces"
+
+[agent]
+shell_timeout = 300
+model_max_retries = 2
