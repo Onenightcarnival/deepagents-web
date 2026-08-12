@@ -31,11 +31,10 @@ from sqlalchemy.exc import IntegrityError
 # ORM 模型导入即注册到 Base.metadata，lifespan 建表依赖于此
 from src.mcp.model import McpServerRecord  # noqa: F401
 from src.providers.model import ProviderRecord  # noqa: F401
-from src.providers.service import resolve_model
 from src.sessions.model import SessionRecord  # noqa: F401
 from src.settings.model import SettingRecord  # noqa: F401
-from src.utils.database import Base, SessionLocal, engine
-from src.utils.resource_loader import CONFIG, ENV
+from src.utils.database import Base, engine
+from src.utils.resource_loader import CONFIG
 
 logger = logging.getLogger("deepagent-web")
 
@@ -117,16 +116,6 @@ async def lifespan(app: FastAPI):
     conn = await aiosqlite.connect(str(CONFIG.paths.data_dir / "checkpoints-py.db"))
     app.state.checkpointer = AsyncSqliteSaver(conn)
     await app.state.checkpointer.setup()
-
-    logger.info("env: %s", ENV)
-    logger.info("listening on http://%s:%s", CONFIG.server.host, CONFIG.server.port)
-    try:
-        with SessionLocal() as db:
-            m = resolve_model(db, None)
-        logger.info("default model: %s @ %s (%s)", m["model"], m["baseUrl"], m["provider"])
-    except RuntimeError as e:
-        logger.warning("no model configured yet: %s", e)
-    logger.info("workspace root: %s", CONFIG.paths.workspace_root)
 
     yield
     await conn.close()
