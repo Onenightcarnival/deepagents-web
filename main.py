@@ -8,6 +8,7 @@
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 
 from src.mcp.router import router as mcp_router
@@ -15,13 +16,14 @@ from src.providers.router import router as providers_router
 from src.sessions.router import router as sessions_router
 from src.settings.router import router as settings_router
 from src.skills.router import router as skills_router
-from src.utils.app_config import auth_middleware, lifespan, on_error, setup_logging
+from src.utils.app_config import auth_middleware, lifespan, on_error, on_validation_error, setup_logging
 from src.utils.resource_loader import CONFIG, PUBLIC_DIR
 
 app = FastAPI(lifespan=lifespan)
 
 app.middleware("http")(auth_middleware)
 app.exception_handler(Exception)(on_error)
+app.exception_handler(RequestValidationError)(on_validation_error)
 
 app.include_router(sessions_router)
 app.include_router(providers_router)

@@ -2,13 +2,12 @@
 
 import contextlib
 
-from fastapi import APIRouter, Request
-from pydantic import ValidationError
+from fastapi import APIRouter
 
 from src.providers.service import get_providers, resolve_model
 from src.settings import service
 from src.settings.template import ProjectConfigBody, ProjectParams, SettingsBody
-from src.utils.app_config import json_error, validation_error_message
+from src.utils.app_config import json_error
 from src.utils.resource_loader import CONFIG
 
 router = APIRouter(prefix="/api")
@@ -29,11 +28,7 @@ async def get_config():
 
 
 @router.post("/settings")
-async def post_settings(request: Request):
-    try:
-        body = SettingsBody.model_validate(await request.json())
-    except ValidationError as e:
-        return json_error(validation_error_message(e))
+async def post_settings(body: SettingsBody):
     if body.approvalMode:
         service.set_setting("approvalMode", body.approvalMode)
     if "defaultModel" in body.model_fields_set:
@@ -45,11 +40,7 @@ async def post_settings(request: Request):
 
 
 @router.post("/project-config")
-async def post_project_config(request: Request):
-    try:
-        body = ProjectConfigBody.model_validate(await request.json())
-    except ValidationError as e:
-        return json_error(validation_error_message(e))
+async def post_project_config(body: ProjectConfigBody):
     key = body.key.strip()
     if not key:
         return json_error("key required")

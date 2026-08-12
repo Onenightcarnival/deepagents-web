@@ -7,16 +7,15 @@ import re
 import uuid
 
 import anyio
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 from langgraph.types import Command
-from pydantic import ValidationError
 
 from src.sessions import service
 from src.sessions.serialize import serialize_history, serialize_task_interrupts
 from src.sessions.service import Run, active_run, public_session, thread_config
 from src.sessions.template import CreateSessionBody, MessageBody, PatchSessionBody, ResumeBody
-from src.utils.app_config import json_error, validation_error_message
+from src.utils.app_config import json_error
 from src.utils.resource_loader import CONFIG, resources
 
 router = APIRouter(prefix="/api")
@@ -45,11 +44,8 @@ async def list_sessions():
 
 
 @router.post("/sessions")
-async def create_session(request: Request):
-    try:
-        body = CreateSessionBody.model_validate(await request.json())
-    except (ValidationError, ValueError):
-        body = CreateSessionBody()
+async def create_session(body: CreateSessionBody | None = None):
+    body = body or CreateSessionBody()
     id = str(uuid.uuid4())
     cwd = (body.cwd or "").strip()
     if cwd:
@@ -85,14 +81,10 @@ async def delete_session(session_id: str):
 
 
 @router.patch("/sessions/{session_id}")
-async def patch_session(session_id: str, request: Request):
+async def patch_session(session_id: str, body: PatchSessionBody):
     session = _get_session(session_id)
     if not session:
         return json_error("session not found", 404)
-    try:
-        body = PatchSessionBody.model_validate(await request.json())
-    except ValidationError as e:
-        return json_error(validation_error_message(e))
     return {"session": public_session(service.update_session(session["id"], title=body.title))}
 
 
@@ -119,16 +111,12 @@ async def session_history(session_id: str):
 
 
 @router.post("/sessions/{session_id}/messages")
-async def post_message(session_id: str, request: Request):
+async def post_message(session_id: str, body: MessageBody):
     session = _get_session(session_id)
     if not session:
         return json_error("session not found", 404)
     if active_run(session["id"]):
         return json_error("session busy", 409)
-    try:
-        body = MessageBody.model_validate(await request.json())
-    except ValidationError as e:
-        return json_error(validation_error_message(e))
     content = body.content
     if session["title"] == "New session":
         service.touch_session(session["id"], content[:40])
@@ -138,16 +126,12 @@ async def post_message(session_id: str, request: Request):
 
 
 @router.post("/sessions/{session_id}/resume")
-async def post_resume(session_id: str, request: Request):
+async def post_resume(session_id: str, body: ResumeBody):
     session = _get_session(session_id)
     if not session:
         return json_error("session not found", 404)
     if active_run(session["id"]):
         return json_error("session busy", 409)
-    try:
-        body = ResumeBody.model_validate(await request.json())
-    except ValidationError:
-        return json_error("decisions required")
     await service.start_run(session, Command(resume={"decisions": body.decisions}))
     return {"ok": True}
 

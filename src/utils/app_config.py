@@ -8,6 +8,7 @@ import logging
 
 import aiosqlite
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
@@ -27,13 +28,26 @@ def json_error(message: str, status: int = 400) -> JSONResponse:
 
 
 def validation_error_message(e) -> str:
-    """取 pydantic ValidationError 的第一条错误，转成对前端友好的单行文案。"""
+    """取校验错误的第一条，转成对前端友好的单行文案。
+
+    兼容 pydantic ValidationError 与 FastAPI RequestValidationError
+    （后者的 loc 以 "body" 开头，展示时去掉）。"""
     first = e.errors()[0]
+    if first.get("type") == "json_invalid":
+        return "invalid JSON body"
     msg = (first.get("msg") or "invalid request").removeprefix("Value error, ")
     if first.get("type") == "value_error":
         return msg  # 自定义校验消息，本身已可读
-    loc = ".".join(str(p) for p in first.get("loc") or ())
+    parts = [str(p) for p in first.get("loc") or ()]
+    if parts and parts[0] == "body":
+        parts = parts[1:]
+    loc = ".".join(parts)
     return f"{loc}: {msg}" if loc else msg
+
+
+async def on_validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
+    """请求体校验失败的全局出口：router 内不再逐个 try/except。"""
+    return json_error(validation_error_message(exc))
 
 
 @contextlib.asynccontextmanager

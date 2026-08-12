@@ -1,7 +1,6 @@
 """技能：目录配置、扫描、SKILL.md 查看。"""
 
-from fastapi import APIRouter, Request
-from pydantic import ValidationError
+from fastapi import APIRouter
 
 from src.settings.service import set_setting
 from src.skills import service
@@ -19,11 +18,7 @@ async def list_skills():
 
 
 @router.post("/skills/dirs")
-async def save_skill_dirs(request: Request):
-    try:
-        body = SkillDirsBody.model_validate(await request.json())
-    except ValidationError:
-        return json_error("dirs must be a string array")
+async def save_skill_dirs(body: SkillDirsBody):
     set_setting("skillDirs", body.dirs)
     return {"ok": True}
 

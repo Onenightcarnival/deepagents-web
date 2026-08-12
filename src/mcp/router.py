@@ -2,12 +2,11 @@
 
 import re
 
-from fastapi import APIRouter, Request
-from pydantic import ValidationError
+from fastapi import APIRouter
 
 from src.mcp import service
 from src.mcp.template import McpTestBody, McpUpsertBody
-from src.utils.app_config import json_error, validation_error_message
+from src.utils.app_config import json_error
 
 router = APIRouter(prefix="/api")
 
@@ -18,11 +17,7 @@ async def list_mcp():
 
 
 @router.post("/mcp/test")
-async def mcp_test(request: Request):
-    try:
-        body = McpTestBody.model_validate(await request.json())
-    except ValidationError as e:
-        return json_error(validation_error_message(e))
+async def mcp_test(body: McpTestBody):
     if body.transport != "http":
         return json_error("only streamable http transport is supported")
     if not body.url:
@@ -31,11 +26,7 @@ async def mcp_test(request: Request):
 
 
 @router.post("/mcp")
-async def upsert_mcp(request: Request):
-    try:
-        body = McpUpsertBody.model_validate(await request.json())
-    except ValidationError as e:
-        return json_error(validation_error_message(e))
+async def upsert_mcp(body: McpUpsertBody):
     if body.transport != "http":
         return json_error("only streamable http transport is supported")
     if not body.url:

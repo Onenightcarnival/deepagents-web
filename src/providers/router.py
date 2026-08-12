@@ -1,7 +1,6 @@
 """模型服务商:列表、保存、连通性检测。"""
 
-from fastapi import APIRouter, Request
-from pydantic import ValidationError
+from fastapi import APIRouter
 
 from src.providers import service
 from src.providers.template import SaveProvidersBody, TestProviderBody
@@ -17,11 +16,7 @@ async def list_providers():
 
 
 @router.post("/providers")
-async def save_providers(request: Request):
-    try:
-        body = SaveProvidersBody.model_validate(await request.json())
-    except ValidationError:
-        return json_error("providers must be an array")
+async def save_providers(body: SaveProvidersBody):
     err = service.validate_providers(body.providers)
     if err:
         return json_error(err)
@@ -30,9 +25,5 @@ async def save_providers(request: Request):
 
 
 @router.post("/providers/test")
-async def providers_test(request: Request):
-    try:
-        body = TestProviderBody.model_validate(await request.json())
-    except ValidationError:
-        return json_error("baseUrl / apiKey / model required")
+async def providers_test(body: TestProviderBody):
     return await service.test_provider(body.baseUrl, body.apiKey, body.model)
