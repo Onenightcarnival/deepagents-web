@@ -177,16 +177,16 @@ button.ghost:hover { color: var(--text); }
   background: #1f6feb22; border: 1px solid #1f6feb55; border-radius: 10px;
   padding: 10px 14px; margin-left: 15%; white-space: pre-wrap;
 }
-.msg.assistant { position: relative; }
 .msg.assistant .content { line-height: 1.65; }
-/* 整条回答复制（悬浮出现） */
-.msg-copy {
-  position: absolute; top: 0; right: 0; z-index: 2; display: none;
-  padding: 2px 8px; font-size: 11px; color: var(--text-dim);
-  background: var(--bg2); border: 1px solid var(--border);
+/* 消息底部操作行（悬浮出现，占位固定避免布局跳动） */
+.msg-actions { display: flex; gap: 6px; margin-top: 3px; opacity: 0; transition: opacity 0.12s; }
+.msg:hover .msg-actions { opacity: 1; }
+.msg.user .msg-actions { justify-content: flex-end; }
+.msg-actions button {
+  background: none; border: none; color: var(--text-dim);
+  font-size: 11px; padding: 1px 4px; cursor: pointer;
 }
-.msg.assistant:hover .msg-copy { display: block; }
-.msg-copy:hover { color: var(--text); }
+.msg-actions button:hover { color: var(--text); }
 /* markdown 元素（marked 渲染产物） */
 .msg .content h1, .msg .content h2, .msg .content h3, .msg .content h4 {
   margin: 12px 0 6px; line-height: 1.4;

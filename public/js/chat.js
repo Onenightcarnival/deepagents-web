@@ -44,10 +44,24 @@ export function showEmptyHint() {
   chatEl.appendChild(div);
 }
 
+// 消息底部的操作行（悬浮出现）；getText 延迟取值，流式期间文本还在增长
+function buildActions(getText, title) {
+  const div = document.createElement("div");
+  div.className = "msg-actions";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.textContent = "复制";
+  btn.title = title;
+  btn.onclick = () => copyText(getText(), btn);
+  div.appendChild(btn);
+  return div;
+}
+
 export function addUserMsg(text) {
   const div = document.createElement("div");
   div.className = "msg user";
   div.innerHTML = `<div class="bubble">${esc(text)}</div>`;
+  div.appendChild(buildActions(() => text, "复制这条消息"));
   chatEl.appendChild(div);
   scrollBottom();
 }
@@ -55,17 +69,14 @@ export function addUserMsg(text) {
 export function newAssistantTurn() {
   const div = document.createElement("div");
   div.className = "msg assistant";
-  const turn = { root: div, textEl: null, think: null, text: "", fullText: "" };
-  // 复制按钮悬浮定位且始终是第一个子节点，不参与 lastElementChild 的分段判断
-  const copyBtn = document.createElement("button");
-  copyBtn.type = "button";
-  copyBtn.className = "msg-copy";
-  copyBtn.textContent = "复制";
-  copyBtn.title = "复制整条回答（Markdown 源码）";
-  copyBtn.style.display = "none";
-  copyBtn.onclick = () => copyText(turn.fullText, copyBtn);
-  div.appendChild(copyBtn);
-  turn.copyBtn = copyBtn;
+  // 内容都挂在 body 上，操作行固定留在消息末尾，不参与 lastElementChild 的分段判断
+  const body = document.createElement("div");
+  div.appendChild(body);
+  const turn = { root: div, body, textEl: null, think: null, text: "", fullText: "" };
+  const actions = buildActions(() => turn.fullText, "复制整条回答（Markdown 源码）");
+  actions.style.display = "none"; // 只有产生过正文才显示
+  div.appendChild(actions);
+  turn.actions = actions;
   chatEl.appendChild(div);
   state.liveAssistant = turn;
   return turn;
@@ -76,15 +87,15 @@ function liveTurn() { return state.liveAssistant ?? newAssistantTurn(); }
 export function appendAiText(text) {
   const turn = liveTurn();
   finalizeThink(turn);
-  if (!turn.textEl || turn.textEl !== turn.root.lastElementChild) {
+  if (!turn.textEl || turn.textEl !== turn.body.lastElementChild) {
     turn.textEl = document.createElement("div");
     turn.textEl.className = "content";
     turn.text = "";
-    turn.root.appendChild(turn.textEl);
+    turn.body.appendChild(turn.textEl);
   }
   turn.text += text;
   turn.fullText += text;
-  turn.copyBtn.style.display = "";
+  turn.actions.style.display = "";
   turn.textEl.innerHTML = renderMd(turn.text);
   enhanceContent(turn.textEl);
   scrollBottom();
@@ -102,7 +113,7 @@ function ensureThink(turn) {
       </button>
       <div class="think-body"></div>`;
     el.querySelector(".think-head").onclick = () => el.classList.toggle("open");
-    turn.root.appendChild(el);
+    turn.body.appendChild(el);
     turn.think = {
       el,
       label: el.querySelector(".tk-label"),
@@ -163,14 +174,15 @@ export function hasToolRow(id) {
 export function addToolCard(call) {
   const turn = liveTurn();
   finalizeThink(turn);
-  let group = turn.root.lastElementChild;
+  let group = turn.body.lastElementChild;
   if (!group || !group.classList.contains("tool-group")) {
     group = document.createElement("div");
     group.className = "tool-group";
-    turn.root.appendChild(group);
+    turn.body.appendChild(group);
   }
   const row = document.createElement("div");
-  row.className = "trow";
+  // 文件改动的 diff 默认摊开可见（可点头部收起），其余工具保持折叠
+  row.className = "trow" + (isDiffTool(call.name) ? " open" : "");
   row.dataset.callId = call.id ?? "";
   // 写文件/改文件展示行级 diff，其余工具展示原始参数
   const argsHTML = isDiffTool(call.name)
