@@ -14,6 +14,14 @@ export async function api(path, opts = {}) {
   return body.data;
 }
 
+// multipart 上传：不能设 Content-Type，让浏览器自己带 boundary
+export async function apiUpload(path, formData) {
+  const res = await fetch(CTX + path, { method: "POST", body: formData });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.message || `HTTP ${res.status}`);
+  return body.data;
+}
+
 // 通知宿主页面（public/ 下的 vanilla 部分）配置有变，刷新模型 chip / 技能 chip
 export function notifySettingsChanged() {
   document.dispatchEvent(new CustomEvent("settings:changed"));
