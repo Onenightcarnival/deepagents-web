@@ -4,7 +4,9 @@
 [server]
 host = "127.0.0.1"      # 局域网访问改为 "0.0.0.0"
 port = 3080
-context_root = "/api"   # API 统一前缀；前端 CTX 与 Vite proxy 均按 /api 约定
+context_root = "/deepagents-web"   # 应用上下文根：主页、静态资源、API 全部收在该前缀下（主页即 /api/）
+                        # 后端返回 index.html 时注入给前端，改这里即可全局生效；healthz 固定在根路径
+                        # 例外：Vite dev server（bun run dev）拿不到注入，其 proxy 按 /api 约定
 
 [paths]
 data_dir = "data"             # 相对项目根目录

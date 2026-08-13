@@ -1,5 +1,6 @@
-// API 上下文根，与 src/config/{env}.toml 的 server.context_root 保持一致
-export const CTX = "/api";
+// API 上下文根：后端返回 index.html 时注入 window.__CTX__（server.context_root），
+// 未注入时（如 Vite dev server）回退 /api，与 Vite proxy 约定一致
+export const CTX = window.__CTX__ ?? "/api";
 
 export async function api(path, opts = {}) {
   const res = await fetch(CTX + path, {
