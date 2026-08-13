@@ -355,8 +355,62 @@ export async function openNewSessionModal() {
       }
     }
   } catch {}
+  $("dir-browser").style.display = "none";
   $("new-session-backdrop").classList.add("visible");
   $("new-cwd").focus();
+}
+
+// ------------------------------------------------------------ directory browser
+// 浏览器拿不到本机绝对路径，且服务可能部署在远程机器上，所以目录浏览由
+// 后端代劳：/dirs/browse 列出服务器上的子目录，前端逐级下钻。
+async function browseTo(path) {
+  let data;
+  try {
+    data = await api("/sessions/dirs/browse" + (path ? "?path=" + encodeURIComponent(path) : ""));
+  } catch (e) {
+    if (path) return browseTo("");  // 输入框里的路径无效时回退到默认起点
+    alert(e.message);
+    return;
+  }
+  $("dir-browser").style.display = "";
+  const pathEl = $("dir-browser-path");
+  // 样式用 direction:rtl 让超长路径保尾截头，副作用是开头的 "/" 会被
+  // 双向算法挪到视觉末尾；前置 LRM 强制它按 LTR 排版
+  pathEl.textContent = "‎" + data.path;
+  pathEl.title = data.path;
+  $("btn-use-dir").onclick = () => {
+    $("new-cwd").value = data.path;
+    $("dir-browser").style.display = "none";
+  };
+  const list = $("dir-browser-list");
+  list.innerHTML = "";
+  if (data.parent) {
+    const up = document.createElement("div");
+    up.className = "recent-dir";
+    up.innerHTML = `<span>⬆️</span><span class="d-name">..</span>`;
+    up.onclick = () => browseTo(data.parent);
+    list.appendChild(up);
+  }
+  for (const d of data.dirs) {
+    const row = document.createElement("div");
+    row.className = "recent-dir";
+    row.innerHTML = `<span>📁</span><span class="d-name">${esc(d.name)}</span>`;
+    row.onclick = () => browseTo(d.path);
+    list.appendChild(row);
+  }
+  if (!data.dirs.length) {
+    const empty = document.createElement("div");
+    empty.className = "hint";
+    empty.style.padding = "8px 10px";
+    empty.textContent = "（没有子目录）";
+    list.appendChild(empty);
+  }
+}
+
+function toggleDirBrowser() {
+  const el = $("dir-browser");
+  if (el.style.display !== "none") { el.style.display = "none"; return; }
+  browseTo($("new-cwd").value.trim());
 }
 
 async function createSessionFromModal() {
@@ -404,6 +458,7 @@ export function initSessions() {
   $("btn-new").onclick = openNewSessionModal;
   $("btn-ns-cancel").onclick = () => $("new-session-backdrop").classList.remove("visible");
   $("btn-ns-create").onclick = createSessionFromModal;
+  $("btn-browse-dir").onclick = toggleDirBrowser;
   $("new-cwd").addEventListener("keydown", (e) => { if (e.key === "Enter") createSessionFromModal(); });
   $("btn-rn-cancel").onclick = () => $("rename-backdrop").classList.remove("visible");
   $("btn-rn-ok").onclick = doRename;

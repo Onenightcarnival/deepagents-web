@@ -32,6 +32,7 @@ class SessionCode(StrEnum):
     NOT_FOUND = "WA-01-01"
     BUSY = "WA-01-02"
     DIR_NOT_FOUND = "WA-01-03"
+    DIR_FORBIDDEN = "WA-01-04"
 
 
 MESSAGES: dict[SessionCode, str] = {
@@ -39,6 +40,7 @@ MESSAGES: dict[SessionCode, str] = {
     SessionCode.NOT_FOUND: "会话不存在",
     SessionCode.BUSY: "会话正在运行中",
     SessionCode.DIR_NOT_FOUND: "目录不存在",
+    SessionCode.DIR_FORBIDDEN: "目录无权限访问",
 }
 
 
@@ -57,6 +59,42 @@ async def recent_dirs(db: Session = Depends(get_db)):
         if len(dirs) >= 8:
             break
     return json_response(status.HTTP_200_OK, SessionCode.OK, MESSAGES[SessionCode.OK], data={"dirs": dirs})
+
+
+@router.get("/dirs/browse")
+async def browse_dirs(path: str = ""):
+    """列出服务器上某目录的子目录，供前端目录浏览器下钻。浏览器出于安全
+    拿不到本机绝对路径，且服务可能部署在远程 Linux，只能由后端代为浏览。"""
+    target = await (await anyio.Path(path or "~").expanduser()).resolve()
+    if not await target.is_dir():
+        return json_response(
+            status.HTTP_400_BAD_REQUEST,
+            SessionCode.DIR_NOT_FOUND,
+            f"{MESSAGES[SessionCode.DIR_NOT_FOUND]}: {target}",
+        )
+    dirs = []
+    try:
+        async for child in target.iterdir():
+            if child.name.startswith("."):
+                continue
+            # 个别子项 stat 失败（权限、坏软链）跳过即可，不该拖垮整个列表
+            with contextlib.suppress(OSError):
+                if await child.is_dir():
+                    dirs.append({"name": child.name, "path": str(child)})
+    except PermissionError:
+        return json_response(
+            status.HTTP_400_BAD_REQUEST,
+            SessionCode.DIR_FORBIDDEN,
+            f"{MESSAGES[SessionCode.DIR_FORBIDDEN]}: {target}",
+        )
+    dirs.sort(key=lambda d: d["name"].lower())
+    parent = str(target.parent) if str(target.parent) != str(target) else None
+    return json_response(
+        status.HTTP_200_OK,
+        SessionCode.OK,
+        MESSAGES[SessionCode.OK],
+        data={"path": str(target), "parent": parent, "dirs": dirs},
+    )
 
 
 @router.get("/")

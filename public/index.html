@@ -52,7 +52,17 @@
     <div id="recent-dirs"></div>
     <div class="field" style="margin-top:10px">
       <label>目录路径（留空则自动创建独立工作目录）</label>
-      <input type="text" id="new-cwd" class="mono" placeholder="~/my-project">
+      <div style="display:flex; gap:8px">
+        <input type="text" id="new-cwd" class="mono" placeholder="~/my-project" style="flex:1">
+        <button id="btn-browse-dir" title="浏览服务器上的目录">浏览…</button>
+      </div>
+    </div>
+    <div id="dir-browser" style="display:none">
+      <div id="dir-browser-head">
+        <span id="dir-browser-path" class="mono" title=""></span>
+        <button class="primary" id="btn-use-dir">选用此目录</button>
+      </div>
+      <div id="dir-browser-list"></div>
     </div>
     <div class="buttons">
       <button id="btn-ns-cancel">取消</button>
