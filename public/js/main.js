@@ -22,7 +22,7 @@ document.addEventListener("settings:changed", async () => {
 });
 
 // 点击遮罩关闭弹窗
-for (const bid of ["new-session-backdrop", "rename-backdrop", "file-view-backdrop"]) {
+for (const bid of ["new-session-backdrop", "rename-backdrop"]) {
   $(bid).onclick = (e) => { if (e.target === $(bid)) $(bid).classList.remove("visible"); };
 }
 

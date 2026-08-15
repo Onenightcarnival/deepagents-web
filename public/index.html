@@ -43,6 +43,21 @@
   </div>
 </div>
 
+<!-- 文件查看器：点击文件树中的文件后在此展示，带行号，Codex 风格侧边栏 -->
+<div id="fileview">
+  <div id="fileview-head">
+    <span id="fileview-path" class="mono"></span>
+    <span id="fileview-meta"></span>
+    <button id="btn-fv-close" title="关闭">×</button>
+  </div>
+  <div id="fileview-body">
+    <div class="fv-scroll">
+      <div class="fv-ln"></div>
+      <pre class="fv-code"><code></code></pre>
+    </div>
+  </div>
+</div>
+
 <!-- 文件树面板：会话 cwd 内的目录树 + 文本预览，手动刷新 -->
 <div id="filepanel">
   <div id="filepanel-head">
@@ -80,14 +95,6 @@
       <button id="btn-ns-cancel">取消</button>
       <button class="primary" id="btn-ns-create">创建</button>
     </div>
-  </div>
-</div>
-
-<!-- file preview modal -->
-<div class="backdrop" id="file-view-backdrop">
-  <div class="modal file-modal">
-    <h3 id="file-view-title" class="mono"></h3>
-    <pre id="file-view-body"><code></code></pre>
   </div>
 </div>
 
