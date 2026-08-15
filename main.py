@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import IntegrityError
 
+from src.files.router import router as files_router
 from src.mcp.router import router as mcp_router
 from src.providers.router import router as providers_router
 from src.sessions.router import router as sessions_router
@@ -40,7 +41,7 @@ app.exception_handler(IntegrityError)(on_integrity_error)
 CONTEXT_ROOT = CONFIG.server.context_root
 
 # 各模块 router 前缀与模块名一致，统一拼在上下文根之后
-for module_router in (sessions_router, providers_router, settings_router, mcp_router, skills_router):
+for module_router in (sessions_router, providers_router, settings_router, mcp_router, skills_router, files_router):
     app.include_router(module_router, prefix=CONTEXT_ROOT)
 
 

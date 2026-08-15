@@ -3,6 +3,7 @@
 // 事件桥接：settings:open（宿主 → 设置应用）、settings:changed（设置应用 → 宿主）。
 import { api } from "./api.js";
 import { addWarnBanner, initChat, showEmptyHint } from "./chat.js";
+import { initFileTree } from "./filetree.js";
 import { initSessions, loadSessions, selectSession } from "./sessions.js";
 import { state } from "./state.js";
 import { initTopbar, loadSkills, renderModelChip, setTopbar } from "./topbar.js";
@@ -11,6 +12,7 @@ import { $ } from "./utils.js";
 initChat();
 initTopbar();
 initSessions();
+initFileTree();
 
 $("btn-settings").onclick = () => document.dispatchEvent(new CustomEvent("settings:open"));
 document.addEventListener("settings:changed", async () => {
@@ -20,7 +22,7 @@ document.addEventListener("settings:changed", async () => {
 });
 
 // 点击遮罩关闭弹窗
-for (const bid of ["new-session-backdrop", "rename-backdrop"]) {
+for (const bid of ["new-session-backdrop", "rename-backdrop", "file-view-backdrop"]) {
   $(bid).onclick = (e) => { if (e.target === $(bid)) $(bid).classList.remove("visible"); };
 }
 

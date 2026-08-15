@@ -28,6 +28,7 @@
     <span class="chip" id="skills-chip">⚡ 0 技能<div id="skills-tip"></div></span>
     <span class="chip" id="usage-chip" style="display:none" title="上下文 = 最近一次模型调用的输入+输出 tokens；累计 = 本会话所有调用的 tokens 总和"></span>
     <span class="chip" id="btn-export" style="display:none" title="导出会话为 Markdown">⬇ 导出</span>
+    <span class="chip" id="files-chip" style="display:none" title="查看工作目录文件">🗂 文件</span>
   </div>
   <div id="chat"><div id="chat-inner"></div></div>
   <div id="todos"></div>
@@ -40,6 +41,17 @@
     </div>
     <div id="status-line"></div>
   </div>
+</div>
+
+<!-- 文件树面板：会话 cwd 内的目录树 + 文本预览，手动刷新 -->
+<div id="filepanel">
+  <div id="filepanel-head">
+    <span>文件</span>
+    <span class="sp"></span>
+    <button id="btn-tree-refresh" title="刷新">⟳</button>
+    <button id="btn-tree-close" title="关闭">×</button>
+  </div>
+  <div id="filetree"></div>
 </div>
 
 <!-- 设置应用（Vue，构建产物在 assets/，源码在 frontend/）挂载点 -->
@@ -68,6 +80,14 @@
       <button id="btn-ns-cancel">取消</button>
       <button class="primary" id="btn-ns-create">创建</button>
     </div>
+  </div>
+</div>
+
+<!-- file preview modal -->
+<div class="backdrop" id="file-view-backdrop">
+  <div class="modal file-modal">
+    <h3 id="file-view-title" class="mono"></h3>
+    <pre id="file-view-body"><code></code></pre>
   </div>
 </div>
 

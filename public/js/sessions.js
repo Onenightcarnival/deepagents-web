@@ -6,6 +6,7 @@ import { api, CTX } from "./api.js";
 import { state, saveCollapsed } from "./state.js";
 import { setTopbar, renderUsage, projectKeyOf, projectLabel, saveAllowlist } from "./topbar.js";
 import { requestNotifyPermission, notifyApproval, notifyRunEnd } from "./notify.js";
+import { fileTreeSessionChanged } from "./filetree.js";
 import {
   resetChat, removeEmptyHint, showEmptyHint, addUserMsg, newAssistantTurn,
   appendAiText, appendReasoning, finalizeThink, addHistoryThink, addToolCard,
@@ -276,6 +277,7 @@ export async function selectSession(s) {
   state.current = s;
   state.usage = { context: 0, total: 0 };
   setTopbar();
+  fileTreeSessionChanged();
   resetChat();
   renderTodos([]);
   renderSessions();
